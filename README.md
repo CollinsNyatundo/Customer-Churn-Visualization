@@ -115,15 +115,15 @@ commercial meaning is retained and so they may have predictive power
 - **Python**: Programming language used for data analysis and visualization development.
 - **Pandas**: Library for data manipulation and analysis.
 - **NumPy**: Library for numerical computations.
-- **Plotly**: Library for creating interactive and visually appealing data visualizations.
 - **Dash**: Framework for building interactive web applications based on Plotly.
+- **SweetViz** : Library for data visualizations.
 
 ## Installation
 
 To run this project locally, you will need to have Python installed along with the required libraries. You can install the necessary packages using pip:
 
 ```bash
-pip install pandas numpy plotly dash
+pip install pandas numpy dash sweetviz
 ```
 
 ## Usage
