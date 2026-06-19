@@ -1,0 +1,38 @@
+version: "3.9"
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.2
+    container_name: mlflow
+    ports: ["5000:5000"]
+    volumes:
+      - ./mlruns:/mlflow/mlruns
+      - ./mlartifacts:/mlflow/mlartifacts
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+        --backend-store-uri sqlite:///mlflow/mlruns/mlflow.db
+        --default-artifact-root /mlflow/mlartifacts
+
+  prefect:
+    image: prefecthq/prefect:3-latest
+    container_name: prefect
+    ports: ["4200:4200"]
+    environment:
+      - PREFECT_API_DATABASE_CONNECTION_URL=sqlite+aiosqlite:////prefect/prefect.db
+    volumes: ["./prefect_data:/prefect"]
+    command: prefect server start --host 0.0.0.0
+
+  dashboard:
+    build: .
+    container_name: churn-dashboard
+    ports: ["8050:8050"]
+    env_file: .env
+    depends_on: [mlflow, prefect]
+    command: gunicorn app:server -b 0.0.0.0:8050 -w 2
+
+  api:
+    build: .
+    container_name: churn-api
+    ports: ["8000:8000"]
+    env_file: .env
+    depends_on: [mlflow]
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000

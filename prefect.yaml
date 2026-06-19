@@ -1,0 +1,51 @@
+# prefect.yaml
+# Deploy and schedule Prefect flows.
+# Apply with: prefect deploy --all
+
+name: churn-project
+prefect-version: "3.0.0"
+
+build: []
+push: []
+
+pull:
+  - prefect.deployments.steps.git_clone:
+      repository: "{{ prefect.variables.git_repo }}"
+      branch: main
+
+deployments:
+
+  # Full pipeline: runs nightly to refresh data + retrain model
+  - name: production
+    flow: src/pipeline/flows.py:full_pipeline_flow
+    description: "Nightly full pipeline: multi-source ingest + feature eng + model training"
+    parameters:
+      train: true
+    schedules:
+      - cron: "0 2 * * *"        # 02:00 UTC every day
+        timezone: "UTC"
+        active: true
+    work_pool:
+      name: default-agent-pool
+
+  # Data-only pipeline: runs every 6 hours for fresh reports without retraining
+  - name: data-refresh
+    flow: src/pipeline/flows.py:data_pipeline_flow
+    description: "6-hourly data refresh: ingest + feature eng + sweetviz report"
+    schedules:
+      - cron: "0 */6 * * *"
+        timezone: "UTC"
+        active: true
+    work_pool:
+      name: default-agent-pool
+
+  # Drift monitoring: runs daily after the full pipeline
+  - name: drift-monitor
+    flow: src/monitoring/monitor_flow.py:drift_monitoring_flow
+    description: "Daily drift detection vs reference dataset"
+    schedules:
+      - cron: "0 4 * * *"        # 04:00 UTC (after pipeline at 02:00)
+        timezone: "UTC"
+        active: true
+    work_pool:
+      name: default-agent-pool

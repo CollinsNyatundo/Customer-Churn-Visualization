@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data — never commit raw or processed data
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.xlsx
+
+# Reports — generated at runtime
+reports/*.html
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Prefect
+.prefect/
+
+# Models
+models/
+*.pkl
+*.joblib
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

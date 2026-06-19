@@ -1,173 +1,106 @@
-# Customer Churn Visualization Project
+# BCG Customer Churn — Production ML System
 
-## Overview
+End-to-end production-grade churn prediction platform built on top of the BCG Telco dataset, extended with a multi-source data pipeline, MLflow experiment tracking, Prefect orchestration, FastAPI prediction API, Evidently drift monitoring, and a Locust load test suite.
 
-The Customer Churn Visualization Project aims to analyze customer churn data and create interactive visualizations to gain insights into the factors contributing to customer attrition. By leveraging data visualization techniques, this project helps businesses identify patterns, trends, and relationships within the customer churn data, enabling them to make data-driven decisions to reduce churn and improve customer retention.
+## Architecture
 
-## Table of Contents
-
-- [Project Description](#project-description)
-- [Dataset](#dataset)
-- [Technologies Used](#technologies-used)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Visualizations](#visualizations)
-- [Insights and Recommendations](#insights-and-recommendations)
-- [Conclusion](#conclusion)
-- [License](#license)
-
-## Project Description
-
-This project aims to create a comprehensive set of interactive visualizations that provide valuable insights into customer churn for a telecommunications company. By analyzing various attributes related to customer demographics, usage patterns, and service interactions, the project aims to identify the key factors that influence customer churn.
-
-### Key Steps in the Project:
-
-1. **Data Preprocessing**: Cleaning and preparing the dataset for analysis.
-2. **Exploratory Data Analysis (EDA)**: Understanding the dataset through visualizations and statistical analysis.
-3. **Feature Engineering**: Creating or transforming new features to enhance the visualization's effectiveness.
-4. **Visualization Development**: Building interactive visualizations using Plotly and Dash.
-5. **Insights Generation**: Analyzing the visualizations to derive insights and identify patterns related to customer churn.
-6. **Recommendations**: Providing actionable recommendations based on the insights gained from the visualizations.
-
-## Dataset
-
-The dataset used in this project is based on the BCG Telco Customer Churn dataset, which contains information about customer demographics, usage patterns, and service interactions. The key features include:
-
-### client_data.csv
-● id = client company identifier
-
-● activity_new = category of the company’s activity
-
-● channel_sales = code of the sales channel
-
-● cons_12m = electricity consumption of the past 12 months
-
-● cons_gas_12m = gas consumption of the past 12 months
-
-● cons_last_month = electricity consumption of the last month
-
-● date_activ = date of activation of the contract
-
-● date_end = registered date of the end of the contract
-
-● date_modif_prod = date of the last modification of the product
-
-● date_renewal = date of the next contract renewal
-
-● forecast_cons_12m = forecasted electricity consumption for the next 12 months
-
-● forecast_cons_year = forecasted electricity consumption for the next calendar year
-
-● forecast_discount_energy = forecasted value of current discount
-
-● forecast_meter_rent_12m = forecasted bill of meter rental for the next 2 months
-
-● forecast_price_energy_off_peak = forecasted energy price for 1st period (off-peak)
-
-● forecast_price_energy_peak = forecasted energy price for 2nd period (peak)
-
-● forecast_price_pow_off_peak = forecasted power price for 1st period (off-peak)
-
-● has_gas = indicated if the client is also a gas client
-
-● imp_cons = current paid consumption
-
-● margin_gross_pow_ele = gross margin on power subscription
-
-● margin_net_pow_ele = net margin on power subscription
-
-● nb_prod_act = number of active products and services
-
-● net_margin = total net margin
-
-● num_years_antig = antiquity of the client (in number of years)
-
-● origin_up = code of the electricity campaign the customer first subscribed to
-
-● pow_max = subscribed power
-
-● churn = has the client churned over the next 3 months
-
-
-### price_data.csv
-
-● id = client company identifier
-
-● price_date = reference date
-
-● price_off_peak_var = price of energy for the 1st period (off-peak)
-
-● price_peak_var = price of energy for the 2nd period (peak)
-
-● price_mid_peak_var = price of energy for the 3rd period (mid peak)
-
-● price_off_peak_fix = price of power for the 1st period (off-peak)
-
-● price_peak_fix = price of power for the 2nd period (peak)
-
-● price_mid_peak_fix = price of power for the 3rd period (mid peak)
-
-Note: some fields are hashed text strings. This preserves the privacy of the original data, but the 
-commercial meaning is retained, and so they may have predictive power
-
-## Technologies Used
-
-- **Python**: Programming language used for data analysis and visualization development.
-- **Pandas**: Library for data manipulation and analysis.
-- **NumPy**: Library for numerical computations.
-- **Dash**: Framework for building interactive web applications based on Plotly.
-- **SweetViz**: Library for data visualizations.
-
-## Installation
-
-To run this project locally, you must install Python and the required libraries. You can install the necessary packages using pip:
-
-```bash
-pip install pandas numpy dash sweetviz
+```
+Data Sources (BCG CSV + CRM + Support + Billing)
+    ↓  MultiSourcePipeline  (src/data/pipeline.py)
+Feature Engineering          (src/features/engineering.py)
+    ↓
+┌─────────────────┬──────────────────────┐
+│  Prefect Flows  │   MLflow Tracking    │
+│  (orchestration)│   (experiments +     │
+│                 │    model registry)   │
+└────────┬────────┴──────────────────────┘
+         ↓
+┌────────────────────────────────────────┐
+│  FastAPI  /predict  /predict/batch     │
+│  Dash Dashboard  (5 source tabs)       │
+│  Evidently Drift Monitor               │
+└────────────────────────────────────────┘
 ```
 
-## Usage
+## Quick start
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/CollinsNyatundo/BCG-customer-churn-visualization.git
-   cd BCG-customer-churn-visualization
-   ```
+```bash
+# 1. Clone and install
+git clone https://github.com/CollinsNyatundo/BCG-customer-churn-visualization.git
+cd BCG-customer-churn-visualization
+pip install -r requirements.txt
 
-2. **Run the Jupyter Notebook**:
-   Launch Jupyter Notebook and open the `BCG-customer-churn-visualization.ipynb` file.
+# 2. Configure environment
+cp .env.example .env
 
-3. **Follow the Notebook Cells**:
-   Execute each cell sequentially to preprocess the data, perform EDA, engineer features, and develop the visualizations using Plotly and Dash.
+# 3. Start services (MLflow + Prefect + Dashboard)
+docker compose up -d
 
-## Visualizations
+# 4. Run the full pipeline (ingest → features → train → register)
+python -m src.pipeline.flows
 
-The project includes a set of interactive visualizations that provide insights into customer churn:
+# 5. Start the prediction API
+uvicorn api.main:app --reload --port 8000
 
-- **Churn Rate by Customer Attributes**: Visualizes churn rates across customer demographics and service attributes.
-- **Churn Rate by Tenure**: Analyzes the relationship between customer tenure and churn.
-- **Churn Rate by Monthly Charges**: Investigate the impact of monthly charges on customer churn.
-- **Churn Rate by Contract Type**: Compares churn rates across different contract types.
-- **Churn Rate by Payment Method**: Examines the influence of payment method on customer churn.
+# 6. Run tests
+pytest tests/ -v --cov=src --cov=api
 
-## Insights and Recommendations
+# 7. Load test / generate demo data
+locust -f locustfile.py --host http://localhost:8000          # web UI
+python locustfile.py --generate --rows 2000                  # demo CSV
+```
 
-The interactive visualizations generated by this project provide valuable insights into customer churn, such as:
+## Project structure
 
-- **Customers with longer tenures have lower churn rates**, suggesting the importance of retaining customers over time.
-- **Customers with higher monthly charges are likelier to churn**, indicating the need for competitive pricing strategies.
-- **Customers on month-to-month contracts have higher churn rates**, emphasizing the value of encouraging long-term commitments.
+```
+src/
+├── config.py                  # Pydantic settings
+├── logging_config.py          # structlog setup
+├── data/
+│   ├── sources/               # BaseDataSource + BCG/CRM/Support/Billing
+│   ├── pipeline.py            # MultiSourcePipeline
+│   ├── loader.py
+│   └── preprocessing.py
+├── features/engineering.py    # 13 engineered features
+├── models/churn_model.py      # GBM + MLflow tracking
+├── tracking/mlflow_tracker.py # context managers
+├── pipeline/
+│   ├── flows.py               # Prefect @flow definitions
+│   └── tasks.py               # Prefect @task definitions
+├── monitoring/
+│   ├── drift.py               # Evidently drift detection
+│   └── monitor_flow.py        # Prefect drift flow
+└── visualizations/
+    ├── eda.py                 # Plotly figure factory
+    └── dashboard.py           # Dash layout + callbacks
+api/
+├── main.py                    # FastAPI app
+├── predictor.py               # MLflow model loader
+└── schemas.py                 # Pydantic request/response
+tests/                         # 54 tests, 62% coverage
+locustfile.py                  # Load test + demo data generator
+```
 
-Based on these insights, the project provides actionable recommendations to reduce customer churn, such as:
+## Data sources
 
-- **Offering incentives for long-term contracts**
-- **Implementing targeted retention strategies for customers with higher monthly charges**
-- **Enhancing customer service and support to improve satisfaction and loyalty**
+| Source | Type | Key features |
+|---|---|---|
+| BCG client_data.csv | CSV | consumption, margins, tenure, churn label |
+| BCG price_data.csv | CSV | off-peak/peak/mid-peak pricing (aggregated) |
+| CRM | Synthetic | NPS score, satisfaction, contact history, contract type |
+| Support | Synthetic | ticket volume, resolution time, escalations |
+| Billing | Synthetic | late payments, outstanding balance, payment method |
 
-## Conclusion
+## Services
 
-The BCG Customer Churn Visualization Project demonstrates how interactive data visualizations can provide valuable insights into customer churn. By leveraging the power of Plotly and Dash, this project enables businesses to explore customer churn data, identify key drivers, and make data-driven decisions to improve customer retention and reduce attrition.
+| Service | Port | URL |
+|---|---|---|
+| Dash Dashboard | 8050 | http://localhost:8050 |
+| FastAPI Prediction API | 8000 | http://localhost:8000/docs |
+| MLflow Tracking | 5000 | http://localhost:5000 |
+| Prefect UI | 4200 | http://localhost:4200 |
+| Locust UI | 8089 | http://localhost:8089 |
 
 ## License
 
-This project is licensed under the MIT License. Please look at the [LICENSE](LICENSE) file for more details.
+MIT
