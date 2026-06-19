@@ -1,0 +1,39 @@
+stages:
+  extract:
+    cmd: python -m src.pipeline.flows
+    deps:
+      - src/data/pipeline.py
+      - src/data/preprocessing.py
+      - src/data/sources/
+      - data/raw/client_data.csv
+      - data/raw/price_data.csv
+    outs:
+      - data/processed/merged_features.parquet
+
+  featurise:
+    cmd: python -c "
+      import pandas as pd
+      from src.features.engineering import build_feature_set
+      df = pd.read_parquet('data/processed/merged_features.parquet')
+      build_feature_set(df).to_parquet('data/processed/featured.parquet', index=False)
+      "
+    deps:
+      - src/features/engineering.py
+      - data/processed/merged_features.parquet
+    outs:
+      - data/processed/featured.parquet
+
+  train:
+    cmd: python -c "
+      import pandas as pd
+      from src.models.churn_model import train
+      df = pd.read_parquet('data/processed/featured.parquet')
+      run_id = train(df)
+      print('MLflow run_id:', run_id)
+      "
+    deps:
+      - src/models/churn_model.py
+      - data/processed/featured.parquet
+    metrics:
+      - reports/metrics.json:
+          cache: false

@@ -1,7 +1,6 @@
 [tool.black]
 line-length = 120
 target-version = ["py311", "py312"]
-skip-string-normalization = false
 
 [tool.ruff]
 line-length = 120
@@ -9,17 +8,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-ignore = [
-    "E501",   # line too long (black handles this)
-    "E402",   # module import not at top (needed for matplotlib.use)
-    "F841",   # local variable assigned but never used
-    "W291",   # trailing whitespace
-    "E711",   # comparison to None
-    "E712",   # comparison to True/False
-]
+ignore = ["E501", "E402", "F841", "W291", "E711", "E712"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["F811"]   # redefined fixtures in conftest
+"tests/*" = ["F811", "F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -31,4 +23,10 @@ omit = [
     "src/visualizations/*",
     "src/monitoring/*",
     "src/pipeline/*",
+    "src/telemetry/*",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_strict_optional = true

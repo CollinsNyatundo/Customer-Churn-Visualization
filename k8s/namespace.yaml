@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: churn-ml
+  labels:
+    app.kubernetes.io/name: churn-ml
+    app.kubernetes.io/managed-by: kubectl

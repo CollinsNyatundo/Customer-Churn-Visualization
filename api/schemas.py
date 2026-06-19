@@ -4,7 +4,10 @@ from pydantic import BaseModel, Field
 
 
 class CustomerFeatures(BaseModel):
-    cons_12m: float = Field(0, ge=0)
+    """Input features for a single customer churn prediction."""
+
+    # BCG core
+    cons_12m: float = Field(0, ge=0, description="12-month electricity consumption")
     cons_gas_12m: float = Field(0, ge=0)
     cons_last_month: float = Field(0, ge=0)
     imp_cons: float = Field(0, ge=0)
@@ -17,16 +20,19 @@ class CustomerFeatures(BaseModel):
     channel_sales: str = "unknown"
     activity_new: str = "unknown"
     origin_up: str = "unknown"
+    # CRM
     nps_score: float = Field(0, ge=-100, le=100)
     satisfaction_score: float = Field(3.0, ge=1, le=5)
     num_contacts_6m: int = Field(0, ge=0)
     last_contact_days_ago: int = Field(90, ge=0)
     contract_type: str = "month-to-month"
+    # Support
     num_tickets_6m: int = Field(0, ge=0)
     avg_resolution_hours: float = Field(24, ge=0)
     escalations_6m: int = Field(0, ge=0)
     open_tickets: int = Field(0, ge=0)
     top_ticket_category: str = "other"
+    # Billing
     num_late_payments_12m: int = Field(0, ge=0)
     avg_days_late: float = Field(0, ge=0)
     payment_method: str = "bank_transfer"
@@ -34,14 +40,30 @@ class CustomerFeatures(BaseModel):
     discount_pct: int = Field(0, ge=0, le=100)
 
 
+class FeatureContribution(BaseModel):
+    """Single feature's SHAP contribution to a prediction."""
+
+    feature: str
+    raw_value: float | str | None
+    shap_value: float
+    direction: str  # "increases_churn" | "decreases_churn"
+
+
 class PredictionResponse(BaseModel):
-    churn_probability: float
+    churn_probability: float = Field(..., ge=0, le=1)
     churn_prediction: bool
-    risk_tier: str
+    risk_tier: str  # "low" | "medium" | "high"
     model_version: str
+
+
+class ExplainResponse(PredictionResponse):
+    """Prediction + SHAP feature attributions."""
+
+    top_features: list[FeatureContribution]
 
 
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     mlflow_uri: str
+    auth_enabled: bool

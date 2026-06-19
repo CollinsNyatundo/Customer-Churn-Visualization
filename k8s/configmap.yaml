@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: churn-config
+  namespace: churn-ml
+data:
+  MLFLOW_TRACKING_URI: "http://mlflow-service:5000"
+  PREFECT_API_URL: "http://prefect-service:4200/api"
+  LOG_FORMAT: "json"
+  LOG_LEVEL: "INFO"
+  DASH_HOST: "0.0.0.0"
+  DASH_PORT: "8050"

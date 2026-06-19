@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: churn-dashboard
+  namespace: churn-ml
+  labels:
+    app: churn-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: churn-dashboard
+  template:
+    metadata:
+      labels:
+        app: churn-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: ghcr.io/collinsnyatundo/customer-churn-visualization:latest
+          command: ["gunicorn", "app:server", "-b", "0.0.0.0:8050", "-w", "2", "--timeout", "120"]
+          ports:
+            - containerPort: 8050
+          envFrom:
+            - configMapRef:
+                name: churn-config
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: churn-dashboard-service
+  namespace: churn-ml
+spec:
+  selector:
+    app: churn-dashboard
+  ports:
+    - port: 8050
+      targetPort: 8050
