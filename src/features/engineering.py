@@ -1,4 +1,5 @@
 """src/features/engineering.py — Domain-driven feature construction."""
+
 import numpy as np
 import pandas as pd
 
@@ -59,12 +60,12 @@ def add_multisource_features(df: pd.DataFrame) -> pd.DataFrame:
         components.append((df["num_late_payments_12m"] / df["num_late_payments_12m"].max()).fillna(0))
     if components:
         import numpy as np
+
         df["cross_source_risk_score"] = np.mean(components, axis=0).round(4)
     # Engagement score: satisfaction + low contact recency
     if "satisfaction_score" in df.columns and "last_contact_days_ago" in df.columns:
         df["engagement_score"] = (
-            df["satisfaction_score"] / 5 -
-            (df["last_contact_days_ago"] / 365).clip(0, 1) * 0.5
+            df["satisfaction_score"] / 5 - (df["last_contact_days_ago"] / 365).clip(0, 1) * 0.5
         ).round(4)
     return df
 

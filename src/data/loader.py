@@ -1,8 +1,11 @@
 """
 src/data/loader.py  —  Load raw CSV files. Path resolution is centralised here.
 """
+
 from pathlib import Path
+
 import pandas as pd
+
 from src.config import settings
 
 DATE_COLS_CLIENT = ["date_activ", "date_end", "date_modif_prod", "date_renewal"]

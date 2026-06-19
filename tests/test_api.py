@@ -1,6 +1,8 @@
 """tests/test_api.py — FastAPI endpoint tests using TestClient."""
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 
@@ -13,6 +15,7 @@ def client():
 
     with patch("api.main.get_predictor", return_value=mock_predictor):
         from api.main import app
+
         yield TestClient(app)
 
 

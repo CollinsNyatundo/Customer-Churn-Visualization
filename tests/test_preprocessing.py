@@ -1,10 +1,9 @@
 """tests/test_preprocessing.py — Tests for cleaning, aggregation, and merging."""
+
 import numpy as np
 import pandas as pd
-import pytest
-from src.data.preprocessing import (
-    clean_client_data, aggregate_price_data, merge_datasets, null_report
-)
+
+from src.data.preprocessing import aggregate_price_data, clean_client_data, merge_datasets, null_report
 
 
 class TestCleanClientData:
@@ -14,7 +13,7 @@ class TestCleanClientData:
 
     def test_consumption_clipped_to_zero(self, sample_client_df):
         dirty = sample_client_df.copy()
-        dirty["cons_12m"] = dirty["cons_12m"] - 99999   # force negatives
+        dirty["cons_12m"] = dirty["cons_12m"] - 99999  # force negatives
         df = clean_client_data(dirty)
         assert (df["cons_12m"] >= 0).all()
 

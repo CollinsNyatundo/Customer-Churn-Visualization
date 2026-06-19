@@ -1,4 +1,5 @@
 """app.py — Production Dash entry point using MultiSourcePipeline."""
+
 import os
 import dash
 from src.logging_config import configure_logging
@@ -7,7 +8,7 @@ from src.data.pipeline import MultiSourcePipeline
 from src.features.engineering import build_feature_set
 from src.visualizations.dashboard import create_layout, register_callbacks
 
-configure_logging(level=os.getenv("LOG_LEVEL","INFO"), json=os.getenv("LOG_FORMAT","text")=="json")
+configure_logging(level=os.getenv("LOG_LEVEL", "INFO"), json=os.getenv("LOG_FORMAT", "text") == "json")
 settings.ensure_dirs()
 
 pipeline = MultiSourcePipeline()

@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class SourceMetadata:
@@ -23,6 +26,7 @@ class SourceMetadata:
             f"{self.source_name}_duplicates": self.duplicate_count,
             **{f"{self.source_name}_{k}": v for k, v in self.extra.items()},
         }
+
 
 class BaseDataSource(ABC):
     name: str = "base"
@@ -43,6 +47,9 @@ class BaseDataSource(ABC):
     def _build_metadata(self, df):
         total = df.size or 1
         return SourceMetadata(
-            source_name=self.name, row_count=len(df), column_count=len(df.columns),
-            null_rate=df.isnull().sum().sum()/total, duplicate_count=int(df.duplicated().sum()),
+            source_name=self.name,
+            row_count=len(df),
+            column_count=len(df.columns),
+            null_rate=df.isnull().sum().sum() / total,
+            duplicate_count=int(df.duplicated().sum()),
         )

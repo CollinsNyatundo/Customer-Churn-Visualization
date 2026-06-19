@@ -1,5 +1,7 @@
 """api/schemas.py — Request and response models for the prediction API."""
+
 from pydantic import BaseModel, Field
+
 
 class CustomerFeatures(BaseModel):
     cons_12m: float = Field(0, ge=0)
@@ -31,11 +33,13 @@ class CustomerFeatures(BaseModel):
     total_outstanding: float = Field(0, ge=0)
     discount_pct: int = Field(0, ge=0, le=100)
 
+
 class PredictionResponse(BaseModel):
     churn_probability: float
     churn_prediction: bool
     risk_tier: str
     model_version: str
+
 
 class HealthResponse(BaseModel):
     status: str

@@ -1,10 +1,10 @@
 """tests/test_sources.py — Unit tests for all DataSource classes."""
-import pytest
+
 import pandas as pd
-from src.data.sources.bcg_source import BCGClientSource, BCGPriceSource
+
+from src.data.sources.billing_source import BillingSource
 from src.data.sources.crm_source import CRMSource
 from src.data.sources.support_source import SupportSource
-from src.data.sources.billing_source import BillingSource
 
 
 class TestCRMSource:
@@ -61,6 +61,7 @@ class TestBillingSource:
 
     def test_valid_payment_methods(self, client_ids):
         from src.data.sources.billing_source import PAYMENT_METHODS
+
         df, _ = BillingSource(client_ids=client_ids).load()
         assert set(df["payment_method"]).issubset(set(PAYMENT_METHODS))
 

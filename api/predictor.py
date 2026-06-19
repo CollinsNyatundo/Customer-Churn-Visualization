@@ -5,6 +5,7 @@ Loads the latest Production (or Staging) model from the MLflow
 registry and exposes a predict() method. The model is loaded once
 at startup and cached — thread-safe for gunicorn multi-worker use.
 """
+
 from __future__ import annotations
 
 import logging
@@ -47,8 +48,7 @@ class ChurnPredictor:
                 logger.warning("Could not load model from stage=%s: %s", s, e)
 
         raise RuntimeError(
-            f"No model found in registry '{name}'. "
-            "Run the full pipeline first: python -m src.pipeline.flows"
+            f"No model found in registry '{name}'. " "Run the full pipeline first: python -m src.pipeline.flows"
         )
 
     @property

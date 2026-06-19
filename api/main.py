@@ -8,15 +8,15 @@ Run locally:
 
 Swagger UI: http://localhost:8000/docs
 """
+
 from __future__ import annotations
 
+import logging
 import os
 import time
-import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from api.predictor import get_predictor
 from api.schemas import CustomerFeatures, HealthResponse, PredictionResponse
@@ -45,6 +45,7 @@ app.add_middleware(
 
 # ── Middleware: request timing ────────────────────────────────────────────
 
+
 @app.middleware("http")
 async def add_timing(request: Request, call_next):
     start = time.perf_counter()
@@ -55,6 +56,7 @@ async def add_timing(request: Request, call_next):
 
 
 # ── Startup: pre-load model ───────────────────────────────────────────────
+
 
 @app.on_event("startup")
 async def startup_event() -> None:
@@ -67,6 +69,7 @@ async def startup_event() -> None:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
+
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 async def health() -> HealthResponse:
@@ -105,7 +108,9 @@ async def predict(customer: CustomerFeatures) -> PredictionResponse:
 
     logger.info(
         "Prediction: prob=%.4f tier=%s version=%s",
-        prob, tier, predictor.model_version,
+        prob,
+        tier,
+        predictor.model_version,
     )
     return PredictionResponse(
         churn_probability=round(prob, 4),
@@ -125,12 +130,14 @@ async def predict_batch(customers: list[CustomerFeatures]) -> list[PredictionRes
         results = []
         for c in customers:
             prob, pred, tier = predictor.predict(c.model_dump())
-            results.append(PredictionResponse(
-                churn_probability=round(prob, 4),
-                churn_prediction=pred,
-                risk_tier=tier,
-                model_version=predictor.model_version,
-            ))
+            results.append(
+                PredictionResponse(
+                    churn_probability=round(prob, 4),
+                    churn_prediction=pred,
+                    risk_tier=tier,
+                    model_version=predictor.model_version,
+                )
+            )
         return results
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))

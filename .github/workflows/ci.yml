@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    name: Lint
+    name: Lint & format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,12 +20,12 @@ jobs:
           cache: pip
 
       - name: Install lint tools
-        run: pip install ruff black
+        run: pip install ruff==0.4.9 black==24.4.2
 
-      - name: Ruff (fast linter)
+      - name: Ruff
         run: ruff check src/ api/ tests/
 
-      - name: Black (format check)
+      - name: Black
         run: black --check src/ api/ tests/
 
   test:
@@ -46,11 +46,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-cov httpx
+        run: |
+          pip install --upgrade pip
+          pip install \
+            pandas numpy scikit-learn plotly pydantic pydantic-settings \
+            fastapi httpx structlog mlflow faker \
+            pytest pytest-cov
 
       - name: Run tests with coverage
         env:
-          MLFLOW_TRACKING_URI: "http://localhost:5000"   # mocked in tests
+          MLFLOW_TRACKING_URI: "http://localhost:5000"
           SYNTHETIC_SEED: "42"
         run: |
           pytest tests/ \

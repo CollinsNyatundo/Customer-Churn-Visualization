@@ -12,6 +12,7 @@ Usage
     report = detector.run(current_df)
     detector.save_report(report, "reports/drift_report.html")
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,17 +27,33 @@ logger = logging.getLogger(__name__)
 
 # Columns to include in drift analysis
 NUMERIC_COLS = [
-    "cons_12m", "cons_gas_12m", "cons_last_month", "net_margin",
-    "num_years_antig", "pow_max", "nb_prod_act", "imp_cons",
-    "nps_score", "satisfaction_score", "num_contacts_6m",
-    "num_tickets_6m", "avg_resolution_hours", "escalations_6m",
-    "num_late_payments_12m", "total_outstanding",
-    "cross_source_risk_score", "engagement_score",
+    "cons_12m",
+    "cons_gas_12m",
+    "cons_last_month",
+    "net_margin",
+    "num_years_antig",
+    "pow_max",
+    "nb_prod_act",
+    "imp_cons",
+    "nps_score",
+    "satisfaction_score",
+    "num_contacts_6m",
+    "num_tickets_6m",
+    "avg_resolution_hours",
+    "escalations_6m",
+    "num_late_payments_12m",
+    "total_outstanding",
+    "cross_source_risk_score",
+    "engagement_score",
 ]
 
 CATEGORICAL_COLS = [
-    "channel_sales", "activity_new", "origin_up",
-    "contract_type", "payment_method", "top_ticket_category",
+    "channel_sales",
+    "activity_new",
+    "origin_up",
+    "contract_type",
+    "payment_method",
+    "top_ticket_category",
 ]
 
 
@@ -67,13 +84,16 @@ class DriftDetector:
         """
         logger.info(
             "Running drift detection: reference=%d rows, current=%d rows",
-            len(self.reference_df), len(current_df),
+            len(self.reference_df),
+            len(current_df),
         )
-        report = Report(metrics=[
-            DataDriftPreset(),
-            DataQualityPreset(),
-            TargetDriftPreset(),
-        ])
+        report = Report(
+            metrics=[
+                DataDriftPreset(),
+                DataQualityPreset(),
+                TargetDriftPreset(),
+            ]
+        )
         report.run(
             reference_data=self.reference_df,
             current_data=current_df,
@@ -114,20 +134,22 @@ class DriftDetector:
     def log_to_mlflow(self, report: Report, run_id: str | None = None) -> None:
         """Log drift summary metrics and the HTML report as an MLflow artifact."""
         import mlflow
+
         from src.config import settings
 
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
         summary = self.get_drift_summary(report)
 
-        ctx = mlflow.start_run(run_id=run_id) if run_id else mlflow.start_run(
-            run_name="drift-monitoring",
-            experiment_id=mlflow.set_experiment(
-                settings.mlflow_experiment_pipeline
-            ).experiment_id,
+        ctx = (
+            mlflow.start_run(run_id=run_id)
+            if run_id
+            else mlflow.start_run(
+                run_name="drift-monitoring",
+                experiment_id=mlflow.set_experiment(settings.mlflow_experiment_pipeline).experiment_id,
+            )
         )
         with ctx:
-            mlflow.log_metrics({k: float(v) for k, v in summary.items()
-                                 if isinstance(v, (int, float))})
+            mlflow.log_metrics({k: float(v) for k, v in summary.items() if isinstance(v, (int, float))})
             path = self.save_report(report)
             mlflow.log_artifact(str(path), artifact_path="drift_reports")
 

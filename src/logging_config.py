@@ -1,5 +1,7 @@
-import logging, sys
+import logging
+
 import structlog
+
 
 def configure_logging(level="INFO", json=False):
     shared = [

@@ -1,10 +1,14 @@
 """tests/test_engineering.py — Tests for all feature engineering functions."""
+
 import pandas as pd
-import pytest
+
 from src.features.engineering import (
-    add_tenure_features, add_consumption_features,
-    add_price_sensitivity, add_margin_features,
-    add_multisource_features, build_feature_set,
+    add_consumption_features,
+    add_margin_features,
+    add_multisource_features,
+    add_price_sensitivity,
+    add_tenure_features,
+    build_feature_set,
 )
 
 
@@ -76,9 +80,14 @@ class TestBuildFeatureSet:
     def test_adds_all_expected_columns(self, merged_df):
         df = build_feature_set(merged_df)
         expected = [
-            "contract_duration_days", "is_long_term", "months_to_renewal",
-            "cons_growth_rate", "high_consumption", "price_spread_var",
-            "margin_efficiency", "cross_source_risk_score",
+            "contract_duration_days",
+            "is_long_term",
+            "months_to_renewal",
+            "cons_growth_rate",
+            "high_consumption",
+            "price_spread_var",
+            "margin_efficiency",
+            "cross_source_risk_score",
         ]
         for col in expected:
             assert col in df.columns, f"Missing: {col}"
