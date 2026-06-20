@@ -70,3 +70,43 @@ locust -f locustfile.py --host http://localhost:8000 \
 # Generate demo prediction CSV (no server needed)
 make generate-demo
 ```
+
+---
+
+## Downloading real-world datasets
+
+### Kaggle Real-World Churn (60k rows)
+
+```bash
+pip install kaggle
+# Place your kaggle.json at ~/.kaggle/kaggle.json
+kaggle datasets download lasaljaywardena/real-world-churn
+mkdir -p data/raw/kaggle_telco
+unzip real-world-churn.zip -d data/raw/kaggle_telco/
+# Then set USE_KAGGLE=true in .env
+```
+
+### Maven Analytics Bank Churn (10k rows)
+
+1. Visit https://mavenanalytics.io/data-playground/bank-customer-churn
+2. Download the CSV
+3. Save to `data/raw/bank/bank_customer_churn.csv`
+4. Set `USE_BANK=true` in `.env`
+
+## Starting real API services
+
+```bash
+# Start EspoCRM (CRM), Zammad (Support), NovaBilling (Billing)
+docker compose --profile real-sources up -d
+
+# Verify they are up
+docker compose ps
+
+# Activate in pipeline
+USE_CRM_API=true USE_SUPPORT_API=true USE_BILLING_API=true make run-pipeline
+```
+
+After starting, configure each service:
+- **EspoCRM** → http://localhost:8080 → Admin → API Users → create key → set `ESPOCRM_API_KEY`
+- **Zammad** → http://localhost:3000 → Admin → Token Access → create token → set `ZAMMAD_API_TOKEN`
+- **NovaBilling** → http://localhost:4000/api/reference → create key → set `NOVABILLING_API_KEY`

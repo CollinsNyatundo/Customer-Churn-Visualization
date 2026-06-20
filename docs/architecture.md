@@ -85,3 +85,43 @@
 | `api/predictor.py` | MLflow model loader (singleton) |
 | `api/explain.py` | SHAP feature attributions |
 | `api/schemas.py` | Pydantic request/response models |
+
+---
+
+## Data source modes
+
+The pipeline supports three modes per enrichment source, toggled via env vars:
+
+### CRM
+| Mode | Class | Activate |
+|---|---|---|
+| Synthetic (default) | `CRMSource` | `USE_CRM_API=false` |
+| EspoCRM API | `CRMApiDataSource` | `USE_CRM_API=true` + EspoCRM running |
+
+### Support
+| Mode | Class | Activate |
+|---|---|---|
+| Synthetic (default) | `SupportSource` | `USE_SUPPORT_API=false` |
+| Zammad API | `SupportApiDataSource` | `USE_SUPPORT_API=true` + Zammad running |
+
+### Billing
+| Mode | Class | Activate |
+|---|---|---|
+| Synthetic (default) | `BillingSource` | `USE_BILLING_API=false` |
+| NovaBilling API | `BillingApiDataSource` | `USE_BILLING_API=true BILLING_PROVIDER=novabilling` |
+| Lago API | `BillingApiDataSource` | `USE_BILLING_API=true BILLING_PROVIDER=lago` |
+
+### Supplemental real-world datasets (appended rows)
+| Dataset | Class | Activate |
+|---|---|---|
+| Kaggle Real-World Churn (60k rows) | `KaggleTelcoSource` | `USE_KAGGLE=true` + CSV downloaded |
+| Maven Bank Churn (10k rows) | `BankChurnSource` | `USE_BANK=true` + CSV downloaded |
+
+### Starting real data services
+```bash
+# Start EspoCRM + Zammad + NovaBilling
+docker compose --profile real-sources up -d
+
+# Activate them in the pipeline
+USE_CRM_API=true USE_SUPPORT_API=true USE_BILLING_API=true python -m src.pipeline.flows
+```

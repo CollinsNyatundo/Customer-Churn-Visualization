@@ -1,0 +1,61 @@
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+
+# Virtual environments
+.venv
+venv
+env
+
+# Data — never bake raw data into images
+data/
+*.csv
+*.parquet
+*.xlsx
+
+# Reports and artefacts
+reports/
+mlruns/
+mlartifacts/
+models/
+*.pkl
+*.joblib
+
+# Jupyter
+notebooks/
+.ipynb_checkpoints/
+
+# Dev tooling
+.pre-commit-config.yaml
+locustfile.py
+Makefile
+tests/
+docs/
+k8s/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# DVC
+.dvc/
+dvc.yaml
+.dvcignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

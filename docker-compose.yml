@@ -1,38 +1,212 @@
 version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Customer Churn ML System — full service stack
+#
+# Core services (always start):
+#   docker compose up -d mlflow prefect dashboard api
+#
+# With real data sources:
+#   docker compose up -d espocrm zammad novabilling
+#
+# Everything:
+#   docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
+
+  # ── ML infrastructure ──────────────────────────────────────────────────────
+
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.13.2
     container_name: mlflow
-    ports: ["5000:5000"]
+    ports:
+      - "5000:5000"
     volumes:
       - ./mlruns:/mlflow/mlruns
       - ./mlartifacts:/mlflow/mlartifacts
     command: >
-      mlflow server --host 0.0.0.0 --port 5000
+      mlflow server
+        --host 0.0.0.0
+        --port 5000
         --backend-store-uri sqlite:///mlflow/mlruns/mlflow.db
         --default-artifact-root /mlflow/mlartifacts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   prefect:
     image: prefecthq/prefect:3-latest
     container_name: prefect
-    ports: ["4200:4200"]
+    ports:
+      - "4200:4200"
     environment:
       - PREFECT_API_DATABASE_CONNECTION_URL=sqlite+aiosqlite:////prefect/prefect.db
-    volumes: ["./prefect_data:/prefect"]
+    volumes:
+      - ./prefect_data:/prefect
     command: prefect server start --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Application services ───────────────────────────────────────────────────
 
   dashboard:
     build: .
     container_name: churn-dashboard
-    ports: ["8050:8050"]
+    ports:
+      - "8050:8050"
     env_file: .env
-    depends_on: [mlflow, prefect]
-    command: gunicorn app:server -b 0.0.0.0:8050 -w 2
+    environment:
+      - LOG_FORMAT=json
+    depends_on:
+      - mlflow
+      - prefect
+    command: gunicorn app:server -b 0.0.0.0:8050 -w 2 --timeout 120
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
 
   api:
     build: .
     container_name: churn-api
-    ports: ["8000:8000"]
+    ports:
+      - "8000:8000"
     env_file: .env
-    depends_on: [mlflow]
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - LOG_FORMAT=json
+    depends_on:
+      - mlflow
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Real CRM: EspoCRM ──────────────────────────────────────────────────────
+  # Set USE_CRM_API=true in .env to activate
+  # Admin UI: http://localhost:8080
+  # Default credentials: admin / admin (change immediately!)
+
+  espocrm:
+    image: espocrm/espocrm:latest
+    container_name: espocrm
+    ports:
+      - "8080:80"
+    environment:
+      - ESPOCRM_DATABASE_HOST=espocrm-db
+      - ESPOCRM_DATABASE_NAME=espocrm
+      - ESPOCRM_DATABASE_USER=espocrm
+      - ESPOCRM_DATABASE_PASSWORD=espocrm_pass
+      - ESPOCRM_ADMIN_USERNAME=admin
+      - ESPOCRM_ADMIN_PASSWORD=admin
+      - ESPOCRM_SITE_URL=http://localhost:8080
+    depends_on:
+      - espocrm-db
+    volumes:
+      - espocrm_data:/var/www/html/data
+    profiles:
+      - real-sources
+
+  espocrm-db:
+    image: mysql:8.0
+    container_name: espocrm-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_pass
+      - MYSQL_DATABASE=espocrm
+      - MYSQL_USER=espocrm
+      - MYSQL_PASSWORD=espocrm_pass
+    volumes:
+      - espocrm_db:/var/lib/mysql
+    profiles:
+      - real-sources
+
+  # ── Real Support: Zammad ───────────────────────────────────────────────────
+  # Set USE_SUPPORT_API=true in .env to activate
+  # Admin UI: http://localhost:3000
+  # Docs: https://docs.zammad.org
+
+  zammad:
+    image: zammad/zammad-docker-compose:latest
+    container_name: zammad
+    ports:
+      - "3000:8080"
+    environment:
+      - MEMCACHE_SERVERS=zammad-memcached:11211
+      - REDIS_URL=redis://zammad-redis:6379
+    depends_on:
+      - zammad-db
+      - zammad-memcached
+      - zammad-redis
+    volumes:
+      - zammad_data:/opt/zammad
+    profiles:
+      - real-sources
+
+  zammad-db:
+    image: postgres:15-alpine
+    container_name: zammad-db
+    environment:
+      - POSTGRES_USER=zammad
+      - POSTGRES_PASSWORD=zammad_pass
+      - POSTGRES_DB=zammad
+    volumes:
+      - zammad_db:/var/lib/postgresql/data
+    profiles:
+      - real-sources
+
+  zammad-memcached:
+    image: memcached:alpine
+    container_name: zammad-memcached
+    profiles:
+      - real-sources
+
+  zammad-redis:
+    image: redis:alpine
+    container_name: zammad-redis
+    profiles:
+      - real-sources
+
+  # ── Real Billing: NovaBilling ──────────────────────────────────────────────
+  # Set USE_BILLING_API=true, BILLING_PROVIDER=novabilling in .env
+  # API: http://localhost:4000
+  # Docs: http://localhost:4000/api/reference
+
+  novabilling:
+    image: ghcr.io/novabilling/billing:latest
+    container_name: novabilling
+    ports:
+      - "4000:4000"
+    environment:
+      - DATABASE_URL=postgresql://nova:nova_pass@novabilling-db:5432/novabilling
+      - SECRET_KEY_BASE=change_me_in_production_use_64_char_random_string
+    depends_on:
+      - novabilling-db
+    profiles:
+      - real-sources
+
+  novabilling-db:
+    image: postgres:15-alpine
+    container_name: novabilling-db
+    environment:
+      - POSTGRES_USER=nova
+      - POSTGRES_PASSWORD=nova_pass
+      - POSTGRES_DB=novabilling
+    volumes:
+      - novabilling_db:/var/lib/postgresql/data
+    profiles:
+      - real-sources
+
+volumes:
+  espocrm_data:
+  espocrm_db:
+  zammad_data:
+  zammad_db:
+  novabilling_db:
