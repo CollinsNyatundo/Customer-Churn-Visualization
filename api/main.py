@@ -1,13 +1,11 @@
 """
 api/main.py
 ------------
-FastAPI prediction service — auth, predict, explain, batch, health.
+FastAPI prediction service.
 
-Run locally:
+Run:
     uvicorn api.main:app --reload --port 8000
     make run-api
-
-Swagger UI: http://localhost:8000/docs
 """
 
 from __future__ import annotations
@@ -15,11 +13,12 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.auth import verify_api_key
+from api.auth import _load_valid_keys, verify_api_key
 from api.explain import explain_prediction
 from api.predictor import get_predictor
 from api.schemas import (
@@ -36,24 +35,59 @@ configure_logging(
     level=os.getenv("LOG_LEVEL", "INFO"),
     json=os.getenv("LOG_FORMAT", "text") == "json",
 )
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: startup + shutdown logic."""
+    # ── Startup ───────────────────────────────────────────────────────────
+    try:
+        _load_valid_keys()
+    except RuntimeError as e:
+        log.error("Auth misconfiguration: %s", e)
+        raise
+
+    log.info("Pre-loading churn model ...")
+    if settings.env == "production":
+        try:
+            get_predictor()
+            log.info("Model loaded successfully.")
+        except Exception as e:
+            log.error("FATAL: model could not be loaded at startup: %s", e)
+            raise
+    else:
+        try:
+            get_predictor()
+            log.info("Model loaded successfully.")
+        except Exception as e:
+            log.warning(
+                "Model not available at startup (dev mode): %s. " "Inference will fail until model is registered.", e
+            )
+    yield
+    # ── Shutdown ──────────────────────────────────────────────────────────
+    log.info("API shutting down.")
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Churn Prediction API",
     description=(
         "Multi-source churn prediction with SHAP explainability.\n\n"
-        "**Authentication**: pass your API key in the `X-API-Key` header.\n"
-        "Set `API_KEYS=key1,key2` env var to enable enforcement "
-        "(omit for development bypass)."
+        "**Auth**: pass your key in `X-API-Key` header. "
+        "Set `API_KEYS` env var to enforce; omit for dev bypass (not for production)."
     ),
-    version="1.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    version="1.2.0",
 )
+
+# ── CORS — configurable, not hardcoded open ──────────────────────────────────
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+if "*" in _cors_origins and settings.env == "production":
+    log.error("CORS is wide open (allow_origins=['*']) in ENV=production. Set CORS_ORIGINS.")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -64,24 +98,28 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_timing_header(request: Request, call_next):
-    start = time.perf_counter()
+    t0 = time.perf_counter()
     response = await call_next(request)
-    ms = round((time.perf_counter() - start) * 1000, 2)
-    response.headers["X-Response-Time-Ms"] = str(ms)
+    response.headers["X-Response-Time-Ms"] = str(round((time.perf_counter() - t0) * 1000, 2))
     return response
 
-
-# ── Startup ───────────────────────────────────────────────────────────────────
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    logger.info("API starting — pre-loading churn model ...")
-    try:
-        get_predictor()
-        logger.info("Model loaded successfully.")
-    except Exception as e:
-        logger.warning("Model not yet available: %s. Will retry on first request.", e)
+    log.info("Pre-loading churn model ...")
+    if settings.env == "production":
+        # In production, fail hard if model is missing — don't serve blind
+        try:
+            get_predictor()
+            log.info("Model loaded successfully.")
+        except Exception as e:
+            log.error("FATAL: model could not be loaded at startup: %s", e)
+            raise
+    else:
+        try:
+            get_predictor()
+            log.info("Model loaded successfully.")
+        except Exception as e:
+            log.warning(
+                "Model not available at startup (dev mode): %s. " "Inference will fail until model is registered.", e
+            )
 
 
 # ── Ops ───────────────────────────────────────────────────────────────────────
@@ -89,9 +127,7 @@ async def startup_event() -> None:
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 async def health() -> HealthResponse:
-    """Liveness check — returns model load status and auth mode."""
-    import os
-
+    """Liveness check — returns model status, auth mode, env."""
     try:
         predictor = get_predictor()
         loaded = True
@@ -111,11 +147,7 @@ async def health() -> HealthResponse:
 # ── Prediction ────────────────────────────────────────────────────────────────
 
 
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-    tags=["prediction"],
-)
+@app.post("/predict", response_model=PredictionResponse, tags=["prediction"])
 async def predict(
     customer: CustomerFeatures,
     _: str = Depends(verify_api_key),
@@ -127,7 +159,7 @@ async def predict(
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        logger.exception("Prediction failed: %s", e)
+        log.exception("Prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Prediction error.")
 
     return PredictionResponse(
@@ -138,69 +170,66 @@ async def predict(
     )
 
 
-@app.post(
-    "/predict/batch",
-    response_model=list[PredictionResponse],
-    tags=["prediction"],
-)
+@app.post("/predict/batch", response_model=list[PredictionResponse], tags=["prediction"])
 async def predict_batch(
     customers: list[CustomerFeatures],
     _: str = Depends(verify_api_key),
 ) -> list[PredictionResponse]:
-    """Predict churn for a batch of up to 500 customers."""
+    """
+    Predict churn for up to 500 customers in a single vectorised call.
+    Single sklearn pipeline.predict_proba() call — not a Python loop.
+    """
     if len(customers) > 500:
         raise HTTPException(status_code=400, detail="Batch size limit is 500.")
+    if not customers:
+        return []
+
     try:
         predictor = get_predictor()
+        results = predictor.predict_batch([c.model_dump() for c in customers])
         return [
             PredictionResponse(
-                churn_probability=round(p, 4),
+                churn_probability=round(prob, 4),
                 churn_prediction=pred,
                 risk_tier=tier,
                 model_version=predictor.model_version,
             )
-            for c in customers
-            for p, pred, tier in [predictor.predict(c.model_dump())]
+            for prob, pred, tier in results
         ]
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        logger.exception("Batch prediction failed: %s", e)
+        log.exception("Batch prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Batch prediction error.")
 
 
 # ── Explainability ────────────────────────────────────────────────────────────
 
 
-@app.post(
-    "/explain",
-    response_model=ExplainResponse,
-    tags=["explainability"],
-)
+@app.post("/explain", response_model=ExplainResponse, tags=["explainability"])
 async def explain(
     customer: CustomerFeatures,
     top_n: int = 10,
     _: str = Depends(verify_api_key),
 ) -> ExplainResponse:
     """
-    Predict churn AND return the top N SHAP feature attributions.
-
-    - `top_n`: number of features to return (default 10, max 30)
-    - Each feature shows its raw value, SHAP contribution, and direction
+    Predict + return top-N SHAP feature attributions.
+    Uses the public get_pipeline() accessor — no internal attribute access.
     """
     top_n = min(top_n, 30)
     try:
         predictor = get_predictor()
         prob, pred, tier = predictor.predict(customer.model_dump())
+        # Use public accessor, not predictor._pipeline
         contributions = explain_prediction(
-            predictor._pipeline,
+            predictor.get_pipeline(),
             customer.model_dump(),
             top_n=top_n,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        logger.exception("Explain failed: %s", e)
+        log.exception("Explain failed: %s", e)
         raise HTTPException(status_code=500, detail="Explanation error.")
 
     return ExplainResponse(

@@ -62,13 +62,34 @@ class TestPredictEndpoint:
 
 
 class TestBatchPredictEndpoint:
-    def test_batch_returns_list(self, client):
+    @pytest.fixture()
+    def batch_client(self):
+        """Isolated client with predict_batch mocked (not module-cached)."""
+        import importlib
+        from unittest.mock import MagicMock, patch
+
+        from fastapi.testclient import TestClient
+
+        import api.main as api_main
+
+        importlib.reload(api_main)
+
+        mock_pred = MagicMock()
+        mock_pred.model_version = "Staging-v1"
+        mock_pred.predict.return_value = (0.45, False, "medium")
+        mock_pred.predict_batch.return_value = [(0.72, True, "high")] * 3
+        mock_pred.get_pipeline.return_value = MagicMock()
+
+        with patch("api.main.get_predictor", return_value=mock_pred):
+            yield TestClient(api_main.app)
+
+    def test_batch_returns_list(self, batch_client):
         payload = [{} for _ in range(3)]
-        resp = client.post("/predict/batch", json=payload)
+        resp = batch_client.post("/predict/batch", json=payload)
         assert resp.status_code == 200
         assert len(resp.json()) == 3
 
-    def test_batch_size_limit(self, client):
+    def test_batch_size_limit(self, batch_client):
         payload = [{} for _ in range(501)]
-        resp = client.post("/predict/batch", json=payload)
+        resp = batch_client.post("/predict/batch", json=payload)
         assert resp.status_code == 400

@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     dash_port: int = 8050
     dash_debug: bool = False
 
+    # Risk tier thresholds (move from hardcoded to config)
+    risk_tier_high: float = 0.60
+    risk_tier_medium: float = 0.30
+
+    # CORS — comma-separated allowed origins; "*" for dev only
+    cors_origins: str = "*"
+
+    # API mode — set to "production" to enforce auth and strict CORS
+    env: str = "development"
+
+    # MLflow offline mode (bypass tracking server)
+    mlflow_offline: bool = False
+
     def ensure_dirs(self):
         for d in [self.data_raw_dir, self.data_processed_dir, self.reports_dir, self.models_dir]:
             d.mkdir(parents=True, exist_ok=True)

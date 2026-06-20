@@ -34,12 +34,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_PATH = settings.data_raw_dir / "kaggle_telco" / "real_world_churn.csv"
 
 # Column mapping: Kaggle names → our internal schema
+# Semantic mapping note
+# -----------------------
+# MonthlyCharges → imp_cons  : Approximate. Monthly billing charge is not the
+#   same as current-period consumption (imp_cons), but it is the closest
+#   Kaggle field. Models trained on mixed BCG+Kaggle data should treat imp_cons
+#   as "billing proxy" rather than true consumption.
+#
+# TotalCharges → cons_12m    : Approximate. Total charges ≠ 12-month kWh
+#   consumption, but it correlates with usage volume. Treat as a proxy.
+#
+# These mappings are intentionally coarse. When precision matters,
+# train separate models per source and ensemble rather than mixing rows.
+
 COLUMN_MAP = {
     "customerID": "id",
     "Churn": "churn",
     "tenure": "num_years_antig",
-    "MonthlyCharges": "imp_cons",
-    "TotalCharges": "cons_12m",
+    "MonthlyCharges": "imp_cons",  # billing proxy — see note above
+    "TotalCharges": "cons_12m",  # usage volume proxy — see note above
     "Contract": "contract_type",
     "PaymentMethod": "payment_method",
     "InternetService": "activity_new",

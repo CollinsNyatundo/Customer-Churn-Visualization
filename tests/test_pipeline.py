@@ -80,11 +80,15 @@ class TestModelTraining:
             patch("src.models.churn_model.log_metrics"),
             patch("src.models.churn_model.log_params"),
         ):
-            fake_run = MagicMock()
-            fake_run.__enter__ = MagicMock(return_value=fake_run)
-            fake_run.__exit__ = MagicMock(return_value=False)
-            fake_run.info.run_id = "test-run-id-123"
-            mock_run.return_value = fake_run
+            from contextlib import contextmanager
+
+            from src.tracking.mlflow_tracker import TrackingResult
+
+            @contextmanager
+            def fake_model_run(*args, **kwargs):
+                yield TrackingResult(run_id="test-run-id-123")
+
+            mock_run.side_effect = fake_model_run
             mock_mlflow.sklearn.log_model = MagicMock()
             mock_mlflow.log_figure = MagicMock()
 
