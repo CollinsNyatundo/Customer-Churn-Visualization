@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-06-20T10:15:30.452757",
+  "dataset": {
+    "total_rows": 3000,
+    "train_rows": 2400,
+    "val_rows": 300,
+    "test_rows": 300,
+    "churn_rate": 0.11,
+    "n_features": 36,
+    "n_engineered": 13
+  },
+  "models": {
+    "LogisticRegression": {
+      "cv_auc": 0.9564,
+      "test_auc": 0.9553,
+      "test_f1": 0.7333,
+      "brier": 0.0647,
+      "lift_10": 5.152,
+      "lift_20": 5.0,
+      "avg_prec": 0.6084,
+      "precision": 0.5789,
+      "recall": 1.0,
+      "run_id": "3f351aea26c947d49b74093b7ef216fe"
+    },
+    "RandomForest": {
+      "cv_auc": 0.9555,
+      "test_auc": 0.966,
+      "test_f1": 0.7416,
+      "brier": 0.0571,
+      "lift_10": 6.061,
+      "lift_20": 5.0,
+      "avg_prec": 0.6977,
+      "precision": 0.5893,
+      "recall": 1.0,
+      "run_id": "f1ce5c2c38a54c608d8ba53f162279f9"
+    },
+    "GradientBoosting": {
+      "cv_auc": 0.9583,
+      "test_auc": 0.9645,
+      "test_f1": 0.6269,
+      "brier": 0.0472,
+      "lift_10": 5.758,
+      "lift_20": 5.0,
+      "avg_prec": 0.6812,
+      "precision": 0.6176,
+      "recall": 0.6364,
+      "run_id": "5a5a96ea7b8f4496a1ff2172dcf5d872"
+    }
+  },
+  "best_model": "RandomForest"
+}

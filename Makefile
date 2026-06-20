@@ -114,3 +114,6 @@ clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache
 	rm -rf reports/coverage reports/benchmark.json
 	@echo "Cleaned."
+
+run-e2e:
+	$(PYTHON) scripts/run_pipeline_e2e.py

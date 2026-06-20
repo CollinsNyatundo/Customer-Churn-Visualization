@@ -50,3 +50,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# MLflow SQLite DB (regenerate with make run-pipeline)
+mlflow.db
