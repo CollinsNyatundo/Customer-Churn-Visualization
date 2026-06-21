@@ -30,11 +30,12 @@ FEATURE_ENGINEERING_VERSION = "1.2.0"
 
 
 class ChurnPredictor:
-    def __init__(self, stage: str = "Production"):
+    def __init__(self, stage: str = "Production", use_feast: bool = False):
         self.stage = stage
         self._pipeline = None
         self._model_version: str = "unknown"
         self._thresholds: FeatureThresholds | None = None
+        self._use_feast = use_feast
 
     def load(self) -> None:
         """
@@ -90,6 +91,12 @@ class ChurnPredictor:
         self._thresholds = thresholds
         log.info("Feature thresholds set: %s", thresholds)
 
+    def _fetch_from_feast(self, customer_ids: list[str]) -> pd.DataFrame:
+        """Retrieve features from Feast online store for given customer IDs."""
+        from src.data.feast_store import get_online_features
+
+        return get_online_features(customer_ids)
+
     def predict(self, features: dict) -> tuple[float, bool, str]:
         """
         Parameters
@@ -105,8 +112,12 @@ class ChurnPredictor:
                 if self._pipeline is None:
                     self.load()
 
-        df = pd.DataFrame([features])
-        df = build_feature_set(df, thresholds=self._thresholds)
+        customer_id = features.get("customer_id")
+        if customer_id and self._use_feast:
+            df = self._fetch_from_feast([customer_id])
+        else:
+            df = pd.DataFrame([features])
+            df = build_feature_set(df, thresholds=self._thresholds)
 
         prob = float(self._pipeline.predict_proba(df)[:, 1][0])
         pred = prob >= settings.risk_tier_high or prob >= 0.5

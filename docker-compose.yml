@@ -204,9 +204,27 @@ services:
     profiles:
       - real-sources
 
+  # ── Redis — production Feast online store ─────────────────────────────────
+  # Switch feature_store/feature_store.yaml online_store.type to "redis"
+  # then run: docker compose --profile redis up -d redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: feast-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    profiles:
+      - redis
+      - real-sources
+
+
 volumes:
   espocrm_data:
   espocrm_db:
   zammad_data:
   zammad_db:
+  redis_data:
   novabilling_db:

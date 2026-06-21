@@ -89,3 +89,24 @@ def save_processed(df: pd.DataFrame, filename: str = "merged_features.parquet") 
     path = settings.data_processed_dir / filename
     df.to_parquet(path, index=False)
     return str(path)
+
+
+@task(name="feast-materialize", retries=1, retry_delay_seconds=30)
+def feast_materialize() -> None:
+    """
+    Push latest offline features to the Feast online store.
+    Run after save_processed() so fresh features are immediately
+    available for low-latency inference via /predict.
+    """
+    from datetime import timedelta, timezone
+
+    log = get_run_logger()
+    try:
+        from src.data.feast_store import materialize
+
+        end = pd.Timestamp.now(tz=timezone.utc)
+        start = end - timedelta(days=30)
+        materialize(start_date=start, end_date=end)
+        log.info("Feast materialisation complete.")
+    except Exception as exc:
+        log.warning("Feast materialisation skipped (store not initialised?): %s", exc)

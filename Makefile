@@ -117,3 +117,12 @@ clean:
 
 run-e2e:
 	$(PYTHON) scripts/run_pipeline_e2e.py
+
+feast-apply:
+	python feature_store/apply.py
+
+feast-materialize:
+	python feature_store/materialize.py
+
+feast-refresh: run-pipeline feast-apply feast-materialize
+	@echo "Feature store refreshed end-to-end."

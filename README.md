@@ -253,6 +253,50 @@ Full API reference → [`docs/api.md`](docs/api.md)
 └── .pre-commit-config.yaml
 ```
 
+
+---
+
+## Feature store (Feast)
+
+Features are versioned and served via a [Feast](https://feast.dev) feature store,
+replacing ad-hoc `build_feature_set()` calls at inference time with a proper
+offline/online registry.
+
+```
+Pipeline run → feast_sink.py → data/feast/*.parquet (offline)
+                     ↓
+              feast materialize → online_store.db / Redis (online)
+                     ↓
+          Training: get_historical_features() ← point-in-time correct
+          Serving:  get_online_features()     ← low-latency dict
+```
+
+### Feature groups
+
+| FeatureView | TTL | Features |
+|---|---|---|
+| `bcg_features` | 30d | consumption, margin, tenure, products |
+| `price_features` | 30d | off/mid/peak price (mean, std, last period) |
+| `crm_features` | 7d | NPS, satisfaction, contact history |
+| `support_features` | 1d | ticket count, resolution, escalations |
+| `billing_features` | 7d | late payments, outstanding balance |
+| `engineered_features` | 30d | risk score, growth rate, price spread |
+
+Two **FeatureServices**: `churn_prediction_v1` (all sources) and
+`churn_prediction_bcg_only` (fallback when CRM/Support/Billing unavailable).
+
+### Quick start
+
+```bash
+make run-pipeline        # generate data/feast/*.parquet
+make feast-apply         # register feature definitions
+make feast-materialize   # push to online store (SQLite default / Redis in prod)
+# or all in one:
+make feast-refresh
+```
+
+Full guide → [`feature_store/README.md`](feature_store/README.md)
+
 ---
 
 ## Testing
@@ -354,6 +398,7 @@ Full guide → [`k8s/README.md`](k8s/README.md)
 | Layer | Technology |
 |---|---|
 | Data pipeline | pandas, pyarrow, DVC |
+| Feature store | Feast (offline: Parquet · online: SQLite/Redis) |
 | Feature engineering | numpy, pandas · FeatureThresholds contract |
 | ML model | scikit-learn (GradientBoostingClassifier, RandomForest, LogisticRegression) |
 | Experiment tracking | MLflow (explicit failures, MLFLOW_OFFLINE opt-in) |

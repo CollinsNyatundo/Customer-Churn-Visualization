@@ -21,6 +21,7 @@ from prefect.logging import get_run_logger
 from src.pipeline.tasks import (
     engineer_features,
     extract_sources,
+    feast_materialize,
     generate_report,
     log_pipeline_metrics,
     save_processed,
@@ -41,6 +42,7 @@ def _run_data_steps() -> tuple[pd.DataFrame, str, str]:
     df = engineer_features(df)
     log_pipeline_metrics(meta)
     parquet_path = save_processed(df)
+    feast_materialize()
     report_path = generate_report(df)
     run_log.info("Data steps complete: %d rows, parquet=%s", len(df), parquet_path)
     return df, parquet_path, report_path
