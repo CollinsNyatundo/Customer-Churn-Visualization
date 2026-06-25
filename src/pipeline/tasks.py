@@ -52,11 +52,28 @@ def log_pipeline_metrics(meta: dict) -> None:
 
 
 @task(name="train-churn-model", retries=1, retry_delay_seconds=60)
-def train_churn_model(df: pd.DataFrame) -> str:
-    """Train the gradient-boosted model and register it in MLflow."""
+def train_churn_model(
+    df: pd.DataFrame,
+    algorithms: list[str] | None = None,
+    optimise_best: bool = False,
+    build_stack: bool = True,
+    n_optuna_trials: int = 30,
+) -> str:
+    """Train all algorithms, optionally optimise + stack, register best model."""
     log = get_run_logger()
-    log.info("Starting model training ...")
-    run_id = train_model(df)
+    log.info(
+        "Starting model training (algorithms=%s, optimise=%s, stack=%s)...",
+        algorithms or "all",
+        optimise_best,
+        build_stack,
+    )
+    run_id = train_model(
+        df,
+        algorithms=algorithms,
+        optimise_best=optimise_best,
+        build_stack=build_stack,
+        n_optuna_trials=n_optuna_trials,
+    )
     log.info("Model training complete. MLflow run_id: %s", run_id)
     return run_id
 

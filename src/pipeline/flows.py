@@ -63,14 +63,39 @@ def data_pipeline_flow() -> str:
 @flow(
     name="churn-full-pipeline",
     description="Full pipeline: data + model training + MLflow registration",
-    version="1.1.0",
+    version="1.2.0",
 )
-def full_pipeline_flow(train: bool = True) -> dict:
+def full_pipeline_flow(
+    train: bool = True,
+    algorithms: list[str] | None = None,
+    optimise_best: bool = False,
+    build_stack: bool = True,
+    n_optuna_trials: int = 30,
+) -> dict:
+    """
+    Parameters
+    ----------
+    train           : whether to run model training (default True)
+    algorithms      : subset of algorithms to sweep; None = all 7
+    optimise_best   : run Optuna on best algorithm (slower, better)
+    build_stack     : build stacking ensemble over top-3 models
+    n_optuna_trials : Optuna trials for hyperparameter search
+    """
     """Full pipeline: data steps + optional model training."""
     run_log = get_run_logger()
     run_log.info("=== Full pipeline flow started (train=%s) ===", train)
     df, parquet_path, report_path = _run_data_steps()
-    run_id = train_churn_model(df) if train else None
+    run_id = (
+        train_churn_model(
+            df,
+            algorithms=algorithms,
+            optimise_best=optimise_best,
+            build_stack=build_stack,
+            n_optuna_trials=n_optuna_trials,
+        )
+        if train
+        else None
+    )
     result = {
         "parquet_path": parquet_path,
         "report_path": report_path,

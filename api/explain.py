@@ -118,12 +118,22 @@ def explain_prediction(pipeline, features: dict, top_n: int = 10) -> list[dict]:
 
     results = []
     for fname, sval in pairs:
-        # Map transformed name back to original for readability
-        original = fname.split("_")[0] if "_" in fname else fname
-        raw_val = features.get(original, features.get(fname, None))
+        # Recover original feature name from OHE-expanded names
+        # e.g. "channel_sales_online" → "channel_sales", value="online"
+        raw_val = None
+        display_name = fname
+        for cat_feat in CATEGORICAL_FEATURES if CATEGORICAL_FEATURES else []:
+            if fname.startswith(cat_feat + "_"):
+                display_name = cat_feat
+                category_value = fname[len(cat_feat) + 1 :]
+                raw_val = features.get(cat_feat, category_value)
+                break
+        if raw_val is None:
+            raw_val = features.get(fname, None)
+
         results.append(
             {
-                "feature": fname,
+                "feature": display_name,
                 "raw_value": raw_val,
                 "shap_value": round(float(sval), 6),
                 "direction": "increases_churn" if sval > 0 else "decreases_churn",

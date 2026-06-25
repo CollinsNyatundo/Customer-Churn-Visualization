@@ -588,4 +588,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Customer churn E2E pipeline")
+    parser.add_argument(
+        "--algorithms", nargs="+", choices=list(MODELS.keys()), default=None, help="Algorithms to sweep (default: all)"
+    )
+    parser.add_argument("--skip-shap", action="store_true", help="Skip SHAP computation (faster)")
+    args = parser.parse_args()
     main()

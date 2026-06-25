@@ -59,3 +59,8 @@ gunicorn==22.0.0
 # ── Utilities ───────────────────────────────────────────────────────────────
 faker==25.2.0
 python-dotenv==1.0.1
+
+xgboost==3.3.0
+lightgbm==4.6.0
+catboost==1.2.10
+optuna==4.9.0

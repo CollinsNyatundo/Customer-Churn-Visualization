@@ -204,6 +204,13 @@ class MultiSourcePipeline:
                 kaggle_src = self._kaggle_src or KaggleTelcoSource()
                 kaggle_df, meta = kaggle_src.load()
                 all_meta.update(meta.as_dict())
+                logger.warning(
+                    "Appending %d Kaggle rows to %d BCG rows. "
+                    "These datasets have different distributions and semantic mappings. "
+                    "Train separate models per source and ensemble if precision is critical.",
+                    len(kaggle_df),
+                    len(df),
+                )
                 df = pd.concat([df, kaggle_df], ignore_index=True)
                 logger.info("Appended %d Kaggle telco rows", len(kaggle_df))
             except FileNotFoundError as e:

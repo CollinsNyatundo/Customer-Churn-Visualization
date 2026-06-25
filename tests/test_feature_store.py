@@ -189,7 +189,7 @@ class TestFeastOnlineStore:
         entity_df = pd.DataFrame(
             {
                 "customer_id": ["CL00001", "CL00002", "CL00003"],
-                "event_timestamp": pd.Timestamp.now(tz=timezone.utc),
+                "event_timestamp": pd.Timestamp.now(tz="UTC"),  # within TTL window of materialized features
             }
         )
         df = get_training_data(entity_df)
@@ -207,7 +207,7 @@ class TestFeastOnlineStore:
             pd.DataFrame(
                 {
                     "customer_id": [cid],
-                    "event_timestamp": pd.Timestamp.now(tz=timezone.utc),
+                    "event_timestamp": pd.Timestamp.now(tz="UTC"),  # within TTL window of materialized features
                 }
             )
         )

@@ -100,7 +100,7 @@ class TestModelTraining:
 
     def test_feature_set_sufficient_for_training(self, merged_df):
         """Merged + featured df should have enough columns to not error on sklearn pipeline."""
-        from src.models.churn_model import CATEGORICAL_FEATURES, NUMERIC_FEATURES
+        from src.models.feature_contract import CATEGORICAL_FEATURES, NUMERIC_FEATURES
 
         available_num = [c for c in NUMERIC_FEATURES if c in merged_df.columns]
         available_cat = [c for c in CATEGORICAL_FEATURES if c in merged_df.columns]

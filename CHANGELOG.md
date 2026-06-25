@@ -7,6 +7,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added — Feature engineering expansion (13 → 38 features)
+- `FeatureThresholds` dataclass with `schema_hash()` for contract drift detection
+- 7 new domains: tenure, consumption, price, margin, support, billing, cross-source
+- New features: `renewal_urgency`, `contract_completion_pct`, `days_since_modification`,
+  `cons_per_product`, `revenue_per_kwh`, `power_utilisation`, `forecast_vs_actual`,
+  `price_peak_ratio`, `price_trend_var/fix`, `price_volatility`,
+  `clv_proxy`, `margin_per_product`, `escalation_rate`, `ticket_rate_per_product`,
+  `service_quality_deficit`, `payment_reliability`, `financial_distress_score`,
+  `revenue_at_risk`, `nps_tenure_interaction`, source flags
+- `_safe_div()` helper for all division operations
+
+### Added — 7-algorithm model sweep + ensemble
+- `src/models/algorithms.py`: ALGORITHM_REGISTRY with LR, RF, GBM, XGBoost, LightGBM, CatBoost, MLP
+- `src/models/ensemble.py`: StackingEnsemble (OOF base predictions → LR meta-learner)
+- `src/models/optimization.py`: Optuna HPO (TPE sampler, per-algorithm search spaces)
+- `src/models/threshold.py`: F1/F2/business-cost/recall-at-precision threshold optimisation
+- `src/models/feature_contract.py`: 67-feature registry, `validate_features()`, `feature_schema_hash()`
+- `src/models/churn_model.py`: full sweep + optimise + stack + threshold + MLflow
+
+### Added — Remaining audit fixes (26/26 resolved)
+- B13: `full_pipeline_flow(algorithms, optimise_best, build_stack, n_trials)`
+- B15: `validate_features()` + `feature_schema_hash()` in feature_contract.py
+- B16: SHAP OHE name remapping in `api/explain.py`
+- B19: `feature_schema_hash()` logged to MLflow in churn_model.py
+
+### Changed
+- `requirements.txt`: added xgboost, lightgbm, catboost, optuna
+- CI: updated to install new ML dependencies
+- `tests/test_engineering.py`: rewritten for 38 features (22 tests)
+- `feature_store/features/feature_views.py`: engineered_feature_view expanded to 38 features
+- `src/data/feast_sink.py`: ENGINEERED_COLS updated to 38 features
+
+---
+
+## [Previous Unreleased]
+
 ### Added
 - Real-world data sources: `KaggleTelcoSource`, `BankChurnSource`
 - API-backed sources: `CRMApiDataSource` (EspoCRM), `SupportApiDataSource` (Zammad), `BillingApiDataSource` (NovaBilling/Lago)

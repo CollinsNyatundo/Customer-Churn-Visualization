@@ -12,21 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: Install lint tools
         run: pip install ruff==0.4.9 black==24.4.2
-
       - name: Black
-        run: black --check src/ api/ tests/
-
+        run: black --check src/ api/ tests/ feature_store/
       - name: Ruff
-        run: ruff check src/ api/ tests/
+        run: ruff check src/ api/ tests/ feature_store/
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -35,27 +31,25 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install \
             pandas numpy scikit-learn plotly pydantic pydantic-settings \
-            fastapi httpx structlog mlflow faker \
+            fastapi httpx structlog mlflow faker feast \
+            xgboost lightgbm catboost optuna \
             pytest pytest-cov
-
       - name: Run tests
         env:
           MLFLOW_TRACKING_URI: "http://localhost:5000"
+          MLFLOW_OFFLINE: "true"
           SYNTHETIC_SEED: "42"
         run: |
           pytest tests/ \
@@ -65,7 +59,6 @@ jobs:
             --cov-report=xml \
             --cov-report=term-missing \
             -v
-
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
@@ -79,20 +72,17 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
           pip install \
             pandas numpy scikit-learn pydantic pydantic-settings \
-            structlog faker pytest pytest-benchmark
-
+            structlog faker xgboost lightgbm catboost \
+            pytest pytest-benchmark
       - name: Run benchmarks
         env:
           SYNTHETIC_SEED: "42"
@@ -102,7 +92,6 @@ jobs:
             --benchmark-json=reports/benchmark.json \
             --benchmark-sort=mean \
             -v
-
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
@@ -116,10 +105,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Build image
         uses: docker/build-push-action@v5
         with:

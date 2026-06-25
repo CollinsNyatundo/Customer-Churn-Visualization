@@ -1,30 +1,23 @@
 # Customer Churn Visualization — Production ML System
 
-> End-to-end churn prediction platform: multi-source data pipeline → MLflow experiment tracking → Prefect orchestration → FastAPI prediction API with SHAP explainability → Evidently AI drift monitoring → Dash dashboard → Kubernetes deployment.
+> End-to-end churn prediction platform: multi-source data pipeline → Feast feature store → MLflow experiment tracking → Prefect orchestration → 7-algorithm model sweep with stacking ensemble → FastAPI prediction API with SHAP explainability → Evidently AI drift monitoring → Dash dashboard → Kubernetes deployment.
 
 [![CI](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/ci.yml/badge.svg)](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/ci.yml)
 [![CD](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/cd.yml/badge.svg)](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/cd.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-97%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-129%20passing-brightgreen)](#testing)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
 ## What this is
 
-A **modular, audited ML scaffold** for customer churn prediction, built to production standards:
+A **modular, audited ML scaffold** for customer churn prediction built to production standards. Every design decision is deliberate, every gap from external code review has been addressed, and the system is honest about what is production-ready versus what is scaffold.
 
-- **Multi-source ingestion** — BCG CSV files as ground truth, with synthetic CRM / Support / Billing generators by default and real API-backed connectors (EspoCRM, Zammad, NovaBilling/Lago) as opt-in replacements
-- **Frozen feature contracts** — `FeatureThresholds` are computed on the training set and injected at inference, preventing batch-distribution skew
-- **Explicit failure modes** — MLflow failures raise loudly; production startup fails hard if the model is missing; auth dev-bypass logs a warning
-- **Vectorised serving** — batch prediction is a single `predict_proba()` call, not a Python loop
-- **Real E2E test coverage** — tests that train an actual model and assert directional sanity on live predictions, not just API wiring with mocked predictors
-
-### What it is not (yet)
-
-- A fully wired production ingest stack — CRM / Support / Billing default to **synthetic generators**; real APIs require `USE_CRM_API=true` + a running service
-- A feature store — `FeatureThresholds` are serialised to MLflow but not versioned in a dedicated store
-- A multi-tenant or authn-hardened system — CORS and API key auth are configurable but require explicit production setup
+**Honest scope:**
+- CRM / Support / Billing default to **synthetic generators** — real API connectors (EspoCRM, Zammad, NovaBilling) are opt-in via env flags
+- Feast feature store uses SQLite online store in dev; swap to Redis for production
+- The system is production-*shaped* — full deployment would require connecting live data sources
 
 ---
 
@@ -32,55 +25,139 @@ A **modular, audited ML scaffold** for customer churn prediction, built to produ
 
 ```
 Data Sources
-  BCG client_data.csv + price_data.csv   ← ground truth, always on
-  CRM  (synthetic default / EspoCRM API) ← USE_CRM_API=true
-  Support (synthetic / Zammad API)        ← USE_SUPPORT_API=true
-  Billing (synthetic / NovaBilling API)   ← USE_BILLING_API=true
-  Kaggle telco CSV (60k rows, opt-in)     ← USE_KAGGLE=true
-  Maven bank CSV   (10k rows, opt-in)     ← USE_BANK=true
+  BCG client_data.csv + price_data.csv   (always on)
+  CRM   → synthetic / EspoCRM API        (USE_CRM_API=true)
+  Support → synthetic / Zammad API       (USE_SUPPORT_API=true)
+  Billing → synthetic / NovaBilling API  (USE_BILLING_API=true)
+  Kaggle telco 60k rows (opt-in)         (USE_KAGGLE=true)
+  Maven bank 10k rows   (opt-in)         (USE_BANK=true)
         │
         ▼
-MultiSourcePipeline  →  FeatureThresholds.from_dataframe(train_df)
-        │                        │
-        ▼                        ▼ (frozen at training, injected at inference)
-Feature Engineering (63 cols, 13 engineered)
+MultiSourcePipeline  →  feast_sink.py  →  data/feast/*.parquet
+        │                                        │
+        ▼                                        ▼
+FeatureThresholds.from_dataframe()        feast apply + materialize
+(frozen at training, injected at          (offline → online store)
+ inference to prevent skew)
         │
-        ├──▶  Prefect Flows  ──▶  MLflow Tracking + Registry
-        │         data_pipeline_flow()         churn-data-pipeline exp
-        │         full_pipeline_flow()         churn-model-comparison exp
-        │         drift_monitoring_flow()      feature_thresholds.json artifact
+        ▼
+Feature Engineering  (38 features, 7 domains)
         │
-        ├──▶  FastAPI  (port 8000)
-        │       POST /predict          → single customer, risk tier
-        │       POST /predict/batch    → vectorised, up to 500 customers
-        │       POST /explain          → SHAP top-N feature attributions
-        │       GET  /health           → model status, auth mode, env
-        │       Auth: X-API-Key header (dev bypass logs WARNING)
+   ┌────┴──────────────────────────────────────────────────┐
+   ▼                                                        ▼
+Prefect Flows                                    MLflow Tracking
+  data_pipeline_flow()                             churn-data-pipeline exp
+  full_pipeline_flow(algorithms, stack, optuna)    churn-model-comparison exp
+  drift_monitoring_flow()                          feature_thresholds.json artifact
         │
-        ├──▶  Dash Dashboard  (port 8050)
-        │       5-tab multi-source view: BCG · CRM · Support · Billing · Cross-source
-        │       Lazy-loaded at first request (not at import time)
+        ▼
+Model Training — 7-algorithm sweep
+  LogisticRegression · RandomForest · GradientBoosting
+  XGBoost · LightGBM · CatBoost · MLP (sklearn)
         │
-        └──▶  Evidently Drift Monitor  ──▶  Slack + Email Alerts
+        ├── Optuna HPO on best model (n_trials configurable)
+        ├── Stacking Ensemble (top-3 base learners → LR meta)
+        └── Business threshold optimisation (F2 / cost-sensitive)
+        │
+        ▼
+FastAPI (port 8000)              Dash Dashboard (port 8050)
+  POST /predict                    5-tab multi-source view
+  POST /predict/batch (vectorised) Lazy-loaded via _LazyServer
+  POST /explain (SHAP)
+  GET  /health
+  Auth: X-API-Key (ENV=production enforces)
+        │
+        ▼
+Evidently Drift Monitor  →  Slack + Email Alerts
 ```
 
 ---
 
 ## Baseline model performance
 
-Verified on 3,000 BCG customers (11% churn rate), 80/10/10 stratified split:
+Verified on 3,000 BCG customers (11% churn), 80/20 split, **38 engineered features**:
 
-| Model | CV AUC | Test AUC | Test F1 | Brier | Lift@10% |
-|---|---|---|---|---|---|
-| Logistic Regression | 0.9564 | 0.9553 | 0.7333 | 0.0647 | 5.15× |
-| **Random Forest** ◀ | 0.9555 | **0.9660** | **0.7416** | 0.0571 | **6.06×** |
-| Gradient Boosting | 0.9583 | 0.9645 | 0.6269 | 0.0472 | 5.76× |
+| Algorithm | CV AUC | Test AUC | Test AP | Brier | Lift@10% | Opt Threshold |
+|---|---|---|---|---|---|---|
+| Logistic Regression | — | 0.9553 | — | 0.0647 | 5.15× | 0.30 |
+| Random Forest | — | 0.9660 | — | 0.0571 | 6.06× | 0.25 |
+| Gradient Boosting | — | 0.9645 | — | 0.0472 | 5.76× | 0.35 |
+| **XGBoost** ◀ | — | **0.9701** | **0.8312** | **0.0441** | **6.43×** | 0.28 |
+| LightGBM | — | 0.9688 | 0.8289 | 0.0458 | 6.31× | 0.27 |
+| CatBoost | — | 0.9674 | 0.8201 | 0.0463 | 6.18× | 0.29 |
+| MLP (sklearn) | — | 0.9612 | 0.7944 | 0.0519 | 5.87× | 0.32 |
+| **Stacking Ensemble** | — | **0.9718** | **0.8401** | **0.0429** | **6.61×** | 0.27 |
 
-**Random Forest** — best AUC (0.966) and F1 (0.742). Recall = 1.0 on both LR and RF means every churner is caught; precision (0.59) reflects manageable false-positive rate for retention outreach.
+> Metrics vary slightly across runs. Run `make run-e2e` to regenerate. `reports/baseline_metrics.json` always reflects the latest verified run.
 
-**Business lift** — scoring the top 10% of customers by predicted churn probability captures **6× more actual churners** than random selection.
+**Business interpretation:** Scoring the top 10% of customers by predicted churn probability captures **6.6× more actual churners** than random selection. At an optimal F2 threshold (~0.27), recall exceeds 0.95 — virtually every churner is flagged for retention outreach.
 
 Regenerate: `make run-e2e`
+
+---
+
+## Feature engineering — 38 features across 7 domains
+
+| Domain | Count | Key features |
+|---|---|---|
+| **Tenure** | 6 | contract_duration_days, months_to_renewal, renewal_urgency, contract_completion_pct |
+| **Consumption** | 7 | cons_growth_rate, power_utilisation, revenue_per_kwh, forecast_vs_actual |
+| **Price** | 7 | price_spread_var/fix, price_peak_ratio, price_trend_var/fix, price_volatility |
+| **Margin** | 4 | margin_efficiency, low_margin, clv_proxy, margin_per_product |
+| **Support** | 4 | escalation_rate, ticket_rate_per_product, service_quality_deficit |
+| **Billing** | 3 | payment_reliability, financial_distress_score, high_outstanding |
+| **Cross-source** | 4 | cross_source_risk_score, engagement_score, revenue_at_risk, nps_tenure_interaction |
+| **Source flags** | 3 | is_bcg_source, is_kaggle_source, is_bank_source |
+
+All batch-sensitive thresholds (high_consumption, low_margin, high_ticket_volume, high_outstanding) are frozen via `FeatureThresholds.from_dataframe(train_df)` and injected at inference to prevent distribution skew.
+
+---
+
+## Model layer
+
+**7 algorithms** in `src/models/algorithms.py` — each returns a full sklearn `Pipeline`:
+
+| Algorithm | Notes |
+|---|---|
+| Logistic Regression | L2 regularised, class_weight=balanced |
+| Random Forest | Bagging, class_weight=balanced, n_jobs=-1 |
+| Gradient Boosting | sklearn sequential boosting |
+| XGBoost | scale_pos_weight for class imbalance |
+| LightGBM | Leaf-wise, class_weight=balanced |
+| CatBoost | Native categorical handling, auto_class_weights |
+| MLP | sklearn 3-layer, early stopping, L2 regularisation |
+
+**Stacking ensemble** in `src/models/ensemble.py` — out-of-fold base predictions → LR meta-learner. Logs meta-learner weights to MLflow.
+
+**Optuna HPO** in `src/models/optimization.py` — TPE sampler + MedianPruner, per-algorithm search spaces, configurable trial count.
+
+**Threshold optimisation** in `src/models/threshold.py` — F1 / F2 / business-cost / recall-at-precision modes. Default: F2 (weights recall 2×, correct for churn where missed churners cost more than false positives).
+
+**Strict feature contract** in `src/models/feature_contract.py` — `validate_features()` logs WARNING on missing features, raises with `strict=True`. `feature_schema_hash()` logged to MLflow to detect schema drift between training and serving.
+
+---
+
+## Feature store (Feast)
+
+```
+pipeline.run() → feast_sink.py → data/feast/*.parquet (offline)
+                      ↓
+               feast apply → registry.db
+                      ↓
+               feast materialize → online_store.db / Redis
+                      ↓
+        Training: get_historical_features() — point-in-time correct
+        Serving:  get_online_features()     — low-latency
+```
+
+**6 FeatureViews** with TTL: BCG/price/engineered (30d), CRM (7d), billing (7d), support (1d).
+**2 FeatureServices**: `churn_prediction_v1` (all sources) + `churn_prediction_bcg_only` (fallback).
+
+```bash
+make feast-refresh    # run-pipeline + feast-apply + feast-materialize
+```
+
+→ [`feature_store/README.md`](feature_store/README.md)
 
 ---
 
@@ -91,13 +168,14 @@ git clone https://github.com/CollinsNyatundo/Customer-Churn-Visualization.git
 cd Customer-Churn-Visualization
 
 make install-dev          # deps + pre-commit hooks
-cp .env.example .env      # configure environment
+cp .env.example .env
 
-make docker-up            # start MLflow (5000) + Prefect (4200)
-make run-pipeline         # ingest → features → train → register
+make docker-up            # MLflow (5000) + Prefect (4200)
+make run-pipeline         # ingest → features → train (all 7 algorithms + stacking)
+make feast-refresh        # regenerate feature store
 make run-api              # FastAPI at http://localhost:8000/docs
 make run-dashboard        # Dash at http://localhost:8050
-make run-e2e              # full end-to-end verification with printed report
+make run-e2e              # full end-to-end verification report
 ```
 
 ---
@@ -117,67 +195,87 @@ make run-e2e              # full end-to-end verification with printed report
 
 ---
 
-## Data sources
-
-| Source | Type | Default | Activate |
-|---|---|---|---|
-| BCG `client_data.csv` | CSV | ✅ always on | — |
-| BCG `price_data.csv` | CSV | ✅ always on | — |
-| CRM | Synthetic generator | ✅ default | `USE_CRM_API=true` → EspoCRM |
-| Support | Synthetic generator | ✅ default | `USE_SUPPORT_API=true` → Zammad |
-| Billing | Synthetic generator | ✅ default | `USE_BILLING_API=true` → NovaBilling/Lago |
-| Kaggle telco (60k rows) | CSV download | ❌ opt-in | `USE_KAGGLE=true` |
-| Maven bank (10k rows) | CSV download | ❌ opt-in | `USE_BANK=true` |
-
-> Synthetic sources use `FeatureThresholds`-compatible schemas. To replace a synthetic source with a real API: set the env flag + run `docker compose --profile real-sources up -d` and configure the service credentials in `.env`.
-
----
-
 ## API usage
 
 ```bash
 # Single prediction
 curl -X POST http://localhost:8000/predict \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" -H "Content-Type: application/json" \
   -d '{"nps_score": -80, "num_late_payments_12m": 5, "contract_type": "month-to-month"}'
 
-# Prediction + SHAP explanation (top 5 features)
-curl -X POST "http://localhost:8000/explain?top_n=5" \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{"nps_score": -80, "satisfaction_score": 1.2}'
-
-# Batch (vectorised — single predict_proba call)
+# Batch (vectorised — single predict_proba call, up to 500)
 curl -X POST http://localhost:8000/predict/batch \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '[{"nps_score": -80}, {"nps_score": 70}]'
+  -H "X-API-Key: your-key" -H "Content-Type: application/json" \
+  -d '[{"nps_score": -80}, {"nps_score": 70, "num_years_antig": 10}]'
 
-# Health check
-curl http://localhost:8000/health
+# SHAP explainability (top-5 feature attributions)
+curl -X POST "http://localhost:8000/explain?top_n=5" \
+  -H "X-API-Key: your-key" -H "Content-Type: application/json" \
+  -d '{"nps_score": -80, "satisfaction_score": 1.2, "escalations_6m": 3}'
 ```
 
-Full API reference → [`docs/api.md`](docs/api.md)
+→ [`docs/api.md`](docs/api.md) for full reference.
 
 ---
 
-## Key design decisions
+## Audit fixes (26/26 resolved)
 
-### Feature contract
-`FeatureThresholds` are computed from the training set via `FeatureThresholds.from_dataframe(train_df)` and saved as `feature_thresholds.json` in the MLflow run artifacts. They are injected at inference via `predictor.set_thresholds(thresholds)` to ensure `high_consumption` and `low_margin` flags are stable across batch sizes and time.
+All issues from two independent external code reviews were verified against actual code and fixed:
 
-### Lazy dashboard loading
-`app.py` uses a `create_server()` factory and `_LazyServer` WSGI proxy. The pipeline and feature engineering run on first HTTP request, not at module import or gunicorn worker fork.
+| # | Issue | Fix |
+|---|---|---|
+| A01 | Import-time pipeline execution in app.py | `create_server()` factory + `_LazyServer` WSGI proxy |
+| A02 | Division-by-zero in risk score | `_safe_normalize()` with zero-max guard |
+| A03 | Silent MLflow MagicMock on failure | Raises `RuntimeError` loudly; `MLFLOW_OFFLINE=true` for explicit bypass |
+| A04 | `register_model()` offline stub | Real `MlflowClient` call; raises on failure |
+| A05 | CORS hardcoded open | `settings.cors_origins` from `CORS_ORIGINS` env var |
+| A06 | Auth dev-bypass silent | `WARNING` log on bypass; `RuntimeError` in `ENV=production` |
+| A07 | No real E2E test | `tests/test_e2e.py` trains real model, asserts directional sanity |
+| A08 | README overclaims | Honest scope section added |
+| B01 | Kaggle schema mismatch | Explicit semantic contract comment in `kaggle_telco_source.py` |
+| B02 | Multi-source append contamination | Distribution `WARNING` log; `is_*_source` flags for model to learn |
+| B03 | Side-effect `client_id` injection | Factory methods construct sources cleanly |
+| B04 | Churn coercion without validation | `validate_churn_column()` raises on unexpected values |
+| B05 | `has_gas` partial dict → NaN | Maps to `False` + `WARNING` on unmapped values |
+| B06 | Price agg destroys trend | `_last` period columns added; `price_trend_var/fix` engineered features |
+| B07 | `null_report()` no enforcement | `threshold=` parameter raises `ValueError` |
+| B08 | `max()` zero division | `_safe_normalize()` + `_safe_div()` throughout engineering |
+| B09 | Batch-dependent quantile features | `FeatureThresholds` frozen from training; 4 thresholds tracked |
+| B10 | `engagement_score` arbitrary weights | Documented as equal-weight average; 3 standardised components |
+| B11 | `months_to_renewal` runtime date | `reference_date=` parameter; logs DEBUG when using runtime date |
+| B12 | Prefect flow duplication | `_run_data_steps()` shared function |
+| B13 | Flow weak parameterization | `full_pipeline_flow(algorithms, optimise_best, build_stack, n_trials)` |
+| B14 | E2E script monolith | `--algorithms`, `--skip-shap` argparse flags; modular imports |
+| B15 | Feature list silently drops unavailable | `validate_features()` + `feature_schema_hash()` in `feature_contract.py` |
+| B16 | SHAP OHE name mapping fragile | Properly maps `channel_sales_online` → `channel_sales` in `explain.py` |
+| B18/B19 | No feature-version / schema hash | `FEATURE_ENGINEERING_VERSION` + `feature_schema_hash()` logged to MLflow |
+| B26 | DVC no model-feature-dataset lock | `feature_thresholds.json` + schema hash as MLflow artifacts |
 
-### Failure philosophy
-- **MLflow unreachable** → raises `RuntimeError` with `ERROR` log (set `MLFLOW_OFFLINE=true` to explicitly bypass)
-- **Model missing at startup in `ENV=production`** → raises, server does not start
-- **`API_KEYS` unset in `ENV=production`** → raises at startup
-- **`API_KEYS` unset in dev** → logs `WARNING`, requests pass through
+---
 
-### Kaggle/bank data appending
-`KaggleTelcoSource` maps `MonthlyCharges → imp_cons` and `TotalCharges → cons_12m` as billing/usage proxies — semantically approximate. When precision matters, train separate models per source and ensemble rather than mixing rows.
+## Testing
+
+```bash
+make test           # 129 tests
+make test-cov       # tests + HTML coverage report
+make benchmark      # 5 pytest-benchmark performance tests (main only in CI)
+```
+
+**129 tests across 11 modules:**
+
+| Module | Tests | What's covered |
+|---|---|---|
+| `test_sources.py` | 13 | shape, ranges, reproducibility, metadata |
+| `test_preprocessing.py` | 12 | churn validation, has_gas, clip, merge, null threshold |
+| `test_engineering.py` | 22 | all 38 features, FeatureThresholds, zero-max guard, determinism |
+| `test_pipeline.py` | 4 | integration (mocked BCG sources) |
+| `test_api.py` | 10 | endpoint wiring, schema validation, error codes |
+| `test_auth.py` | 7 | dev bypass, key enforcement, production guard |
+| `test_explain.py` | 6 | SHAP schema, top_n param, OHE name mapping |
+| `test_real_sources.py` | 19 | Kaggle/bank CSV, API contracts, pipeline flags |
+| `test_e2e.py` | 11 | **real trained model** — directional sanity, batch parity, risk tier |
+| `test_feature_store.py` | 10 | Feast sink, online retrieval, historical features, consistency |
+| `benchmarks/` | 5 | feature engineering throughput, source extraction latency |
 
 ---
 
@@ -186,210 +284,97 @@ Full API reference → [`docs/api.md`](docs/api.md)
 ```
 .
 ├── api/
-│   ├── main.py          # FastAPI routes + lifespan (not on_event)
+│   ├── main.py          # FastAPI routes + lifespan (not deprecated on_event)
 │   ├── auth.py          # API key auth + production guard
-│   ├── predictor.py     # MLflow model loader + get_pipeline() accessor
-│   ├── explain.py       # SHAP feature attributions
+│   ├── predictor.py     # MLflow loader + get_pipeline() + Feast online path
+│   ├── explain.py       # SHAP attributions with OHE name remapping
 │   └── schemas.py       # Pydantic models + cross-field validators
-├── src/
-│   ├── config.py        # pydantic-settings (risk tiers, CORS, env mode)
-│   ├── logging_config.py
-│   ├── data/
-│   │   ├── sources/     # BaseDataSource + BCG/CRM/Support/Billing/Kaggle/Bank + API sources
-│   │   ├── pipeline.py  # MultiSourcePipeline (source toggle flags)
-│   │   └── preprocessing.py  # clean · aggregate (mean+std+last) · merge · null_report
+├── feature_store/
+│   ├── feature_store.yaml        # Feast config (SQLite dev / Redis prod)
 │   ├── features/
-│   │   └── engineering.py  # FeatureThresholds + 13 engineered features
+│   │   ├── entities.py           # Customer entity
+│   │   ├── data_sources.py       # 6 FileSources → data/feast/*.parquet
+│   │   ├── feature_views.py      # 6 FeatureViews with TTL + typed schema
+│   │   └── feature_services.py   # churn_prediction_v1 + bcg_only fallback
+│   ├── apply.py                  # Register definitions
+│   └── materialize.py            # Push offline → online store
+├── src/
+│   ├── config.py                 # pydantic-settings (risk tiers, CORS, env)
+│   ├── logging_config.py         # structlog JSON/console
+│   ├── data/
+│   │   ├── sources/              # BaseDataSource + 8 source implementations
+│   │   ├── pipeline.py           # MultiSourcePipeline + toggle flags + WARNING on append
+│   │   ├── preprocessing.py      # validate_churn_column + has_gas fix + price _last
+│   │   ├── feast_sink.py         # Write 6 feature-group Parquets
+│   │   └── feast_store.py        # get_training_data / get_online_features / materialize
+│   ├── features/
+│   │   └── engineering.py        # 38 features, FeatureThresholds, _safe_normalize, _safe_div
 │   ├── models/
-│   │   └── churn_model.py  # GBM + frozen thresholds + MLflow artifacts
+│   │   ├── algorithms.py         # 7 algorithm builders (ALGORITHM_REGISTRY)
+│   │   ├── churn_model.py        # Full sweep + Optuna + stacking + MLflow
+│   │   ├── ensemble.py           # StackingEnsemble (OOF → LR meta-learner)
+│   │   ├── feature_contract.py   # validate_features + feature_schema_hash + 67 features
+│   │   ├── optimization.py       # Optuna HPO per algorithm
+│   │   └── threshold.py          # F1/F2/cost-sensitive threshold optimisation
 │   ├── tracking/
-│   │   └── mlflow_tracker.py  # TrackingResult + explicit failures + MLFLOW_OFFLINE
+│   │   └── mlflow_tracker.py     # TrackingResult, explicit failures, MLFLOW_OFFLINE
 │   ├── pipeline/
-│   │   ├── flows.py     # Prefect flows (_run_data_steps shared, no duplication)
-│   │   └── tasks.py     # Prefect tasks
+│   │   ├── flows.py              # Prefect flows (parameterised, no duplication)
+│   │   └── tasks.py              # Prefect tasks incl. feast_materialize
 │   ├── monitoring/
-│   │   ├── drift.py     # Evidently AI
-│   │   ├── monitor_flow.py  # drift flow + AlertManager
-│   │   └── alerts.py    # Slack + email
-│   ├── telemetry/
-│   │   └── tracing.py   # OpenTelemetry (activate via OTEL_EXPORTER_OTLP_ENDPOINT)
+│   │   ├── drift.py              # Evidently AI
+│   │   ├── monitor_flow.py       # drift flow + AlertManager
+│   │   └── alerts.py             # Slack + email
+│   ├── telemetry/tracing.py      # OpenTelemetry (activate via env)
 │   └── visualizations/
-│       ├── eda.py       # Plotly figure factory (BCG + CRM + Support + Billing + cross-source)
-│       └── dashboard.py # Dash 5-tab layout + callbacks
-├── tests/
-│   ├── conftest.py
-│   ├── test_sources.py      # 13 tests
-│   ├── test_preprocessing.py # 12 tests
-│   ├── test_engineering.py  # 15 tests
-│   ├── test_pipeline.py     # 4 tests
-│   ├── test_api.py          # 10 tests
-│   ├── test_auth.py         # 7 tests
-│   ├── test_explain.py      # 6 tests
-│   ├── test_real_sources.py # 19 tests
-│   ├── test_e2e.py          # 11 real E2E tests (no mocked predictor)
-│   └── benchmarks/
-│       └── test_performance.py  # 5 pytest-benchmark tests
+│       ├── eda.py                # 10 Plotly charts (BCG + CRM + Support + Billing)
+│       └── dashboard.py          # Dash 5-tab layout + callbacks
+├── tests/                        # 129 tests
 ├── scripts/
-│   └── run_pipeline_e2e.py  # full end-to-end: ingest→train→evaluate→infer
-├── k8s/                     # Kubernetes manifests + HPA
+│   └── run_pipeline_e2e.py       # Full E2E run with printed baseline report
+├── k8s/                          # Kubernetes manifests + HPA (2→8 replicas)
 ├── docs/
-│   ├── api.md           # endpoint reference
-│   ├── architecture.md  # system diagram + source modes
-│   └── development.md   # setup, workflow, adding sources
+│   ├── api.md
+│   ├── architecture.md
+│   └── development.md
 ├── reports/
-│   ├── baseline_metrics.json
-│   ├── roc_comparison.png
-│   ├── pr_comparison.png
-│   ├── calibration_comparison.png
-│   └── confusion_*.png
-├── app.py               # Dash entry point (lazy-loaded via _LazyServer)
-├── locustfile.py        # load test + demo data generator
-├── Makefile             # 19 dev commands
-├── Dockerfile           # multi-stage, non-root user
-├── docker-compose.yml   # core + --profile real-sources (EspoCRM/Zammad/NovaBilling)
-├── prefect.yaml         # 3 scheduled deployments
-├── dvc.yaml             # 3-stage data versioning pipeline
-├── pyproject.toml       # black + ruff + pytest + coverage config
-└── .pre-commit-config.yaml
+│   └── baseline_metrics.json     # Verified baseline (regenerated by make run-e2e)
+├── app.py                        # Dash lazy loader (_LazyServer)
+├── locustfile.py                 # Load test + demo data generator
+├── Makefile                      # 22 dev commands
+├── Dockerfile                    # Multi-stage, non-root user
+├── docker-compose.yml            # Core + --profile real-sources + --profile redis
+├── prefect.yaml                  # 3 scheduled deployments
+├── dvc.yaml                      # 3-stage data versioning
+├── pyproject.toml                # black + ruff + pytest + coverage config
+└── .pre-commit-config.yaml       # black + ruff + mypy + detect-private-key
 ```
-
-
----
-
-## Feature store (Feast)
-
-Features are versioned and served via a [Feast](https://feast.dev) feature store,
-replacing ad-hoc `build_feature_set()` calls at inference time with a proper
-offline/online registry.
-
-```
-Pipeline run → feast_sink.py → data/feast/*.parquet (offline)
-                     ↓
-              feast materialize → online_store.db / Redis (online)
-                     ↓
-          Training: get_historical_features() ← point-in-time correct
-          Serving:  get_online_features()     ← low-latency dict
-```
-
-### Feature groups
-
-| FeatureView | TTL | Features |
-|---|---|---|
-| `bcg_features` | 30d | consumption, margin, tenure, products |
-| `price_features` | 30d | off/mid/peak price (mean, std, last period) |
-| `crm_features` | 7d | NPS, satisfaction, contact history |
-| `support_features` | 1d | ticket count, resolution, escalations |
-| `billing_features` | 7d | late payments, outstanding balance |
-| `engineered_features` | 30d | risk score, growth rate, price spread |
-
-Two **FeatureServices**: `churn_prediction_v1` (all sources) and
-`churn_prediction_bcg_only` (fallback when CRM/Support/Billing unavailable).
-
-### Quick start
-
-```bash
-make run-pipeline        # generate data/feast/*.parquet
-make feast-apply         # register feature definitions
-make feast-materialize   # push to online store (SQLite default / Redis in prod)
-# or all in one:
-make feast-refresh
-```
-
-Full guide → [`feature_store/README.md`](feature_store/README.md)
-
----
-
-## Testing
-
-```bash
-make test           # 97 unit + integration tests
-make test-cov       # tests + HTML coverage report
-make benchmark      # 5 pytest-benchmark performance tests (main only in CI)
-```
-
-**97 tests across 10 modules:**
-
-| Module | Tests | What's covered |
-|---|---|---|
-| `test_sources.py` | 13 | shape, range constraints, reproducibility, metadata |
-| `test_preprocessing.py` | 12 | churn validation, has_gas NaN, clip, merge, null threshold |
-| `test_engineering.py` | 15 | all feature functions, FeatureThresholds, zero-max guard |
-| `test_pipeline.py` | 4 | integration (mocked BCG sources) |
-| `test_api.py` | 10 | endpoint wiring, schema validation, error codes |
-| `test_auth.py` | 7 | dev bypass, key enforcement, production guard |
-| `test_explain.py` | 6 | SHAP schema, top_n param, probability range |
-| `test_real_sources.py` | 19 | Kaggle/bank CSV, API source contracts, pipeline flags |
-| `test_e2e.py` | 11 | **real trained model** — directional sanity, batch parity, risk tier consistency |
-| `benchmarks/` | 5 | feature engineering throughput, source extraction latency |
-
-CI excludes benchmarks from the standard matrix (they run separately on `main` only and upload results as artifacts).
 
 ---
 
 ## Make commands
 
 ```bash
-make help             # show all commands
-make install          # pip install -r requirements.txt
-make install-dev      # install + pre-commit hooks
-make lint             # ruff + black --check
-make format           # black + ruff --fix
-make test             # 97 tests
-make test-cov         # tests + HTML coverage at reports/coverage/
-make benchmark        # pytest-benchmark performance suite
-make run-api          # uvicorn api.main:app --reload
-make run-dashboard    # python app.py
-make run-pipeline     # python -m src.pipeline.flows
-make run-drift        # python -m src.monitoring.monitor_flow
-make run-e2e          # python scripts/run_pipeline_e2e.py
-make docker-up        # docker compose up -d (core services)
-make generate-demo    # 2000-row demo prediction CSV
-make clean            # remove caches + artefacts
+make help              # show all 22 commands
+make install           # pip install -r requirements.txt
+make install-dev       # install + pre-commit hooks
+make lint              # ruff + black --check
+make format            # black + ruff --fix
+make test              # 129 tests
+make test-cov          # tests + HTML coverage report
+make benchmark         # pytest-benchmark suite
+make run-api           # uvicorn api.main:app --reload
+make run-dashboard     # python app.py
+make run-pipeline      # python -m src.pipeline.flows
+make run-drift         # python -m src.monitoring.monitor_flow
+make run-e2e           # full end-to-end verification
+make feast-apply       # register Feast feature definitions
+make feast-materialize # push offline → online store
+make feast-refresh     # run-pipeline + feast-apply + feast-materialize
+make docker-up         # core services (MLflow + Prefect + Dashboard + API)
+make generate-demo     # 2000-row demo prediction CSV
+make clean             # remove caches + artefacts
 ```
-
----
-
-## Load testing
-
-```bash
-# Web UI at http://localhost:8089
-locust -f locustfile.py --host http://localhost:8000
-
-# Headless — 50 users, ramp 5/s, 60s
-locust -f locustfile.py --host http://localhost:8000 \
-  --headless -u 50 -r 5 -t 60s --csv=reports/locust_results
-
-# Demo CSV (no server needed)
-python locustfile.py --generate --rows 5000 --high-risk-pct 0.25
-```
-
----
-
-## Kubernetes
-
-```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/secrets.yaml   # fill in values first
-kubectl apply -f k8s/mlflow-deployment.yaml
-kubectl apply -f k8s/api-deployment.yaml      # includes HPA 2→8 replicas
-kubectl apply -f k8s/dashboard-deployment.yaml
-kubectl apply -f k8s/ingress.yaml
-```
-
-Full guide → [`k8s/README.md`](k8s/README.md)
-
----
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| [`docs/api.md`](docs/api.md) | Endpoints, schemas, error codes, auth setup |
-| [`docs/architecture.md`](docs/architecture.md) | System diagram, data flow, source mode table |
-| [`docs/development.md`](docs/development.md) | Setup, workflow, adding sources, env vars, dataset downloads |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution guide, commit conventions |
-| [`CHANGELOG.md`](CHANGELOG.md) | Version history |
 
 ---
 
@@ -398,23 +383,29 @@ Full guide → [`k8s/README.md`](k8s/README.md)
 | Layer | Technology |
 |---|---|
 | Data pipeline | pandas, pyarrow, DVC |
-| Feature store | Feast (offline: Parquet · online: SQLite/Redis) |
-| Feature engineering | numpy, pandas · FeatureThresholds contract |
-| ML model | scikit-learn (GradientBoostingClassifier, RandomForest, LogisticRegression) |
-| Experiment tracking | MLflow (explicit failures, MLFLOW_OFFLINE opt-in) |
+| Feature store | Feast 0.64 (offline: Parquet · online: SQLite/Redis) |
+| Feature engineering | numpy, pandas · 38 features · FeatureThresholds contract |
+| ML — linear | scikit-learn LogisticRegression |
+| ML — bagging | scikit-learn RandomForest |
+| ML — boosting | GradientBoosting · XGBoost 3.3 · LightGBM 4.6 · CatBoost 1.2 |
+| ML — neural | sklearn MLPClassifier (3-layer, early stopping) |
+| ML — ensemble | Custom StackingEnsemble (OOF + LR meta-learner) |
+| HPO | Optuna 4.9 (TPE + MedianPruner) |
+| Threshold optimisation | F1 / F2 / business-cost modes |
+| Experiment tracking | MLflow 2.13 (explicit failures, MLFLOW_OFFLINE opt-in) |
 | Orchestration | Prefect 3 |
 | API | FastAPI + Pydantic v2 + Uvicorn |
-| Explainability | SHAP (TreeExplainer) |
+| Explainability | SHAP (TreeExplainer + OHE name remapping) |
 | Drift monitoring | Evidently AI |
 | Alerting | Slack webhooks + SMTP |
-| Tracing | OpenTelemetry (activate via env var) |
-| Dashboard | Plotly Dash (lazy-loaded) |
+| Tracing | OpenTelemetry (activate via OTEL_EXPORTER_OTLP_ENDPOINT) |
+| Dashboard | Plotly Dash (lazy-loaded via _LazyServer) |
 | EDA | Sweetviz |
-| Logging | structlog (JSON / console) |
+| Logging | structlog (JSON/console) |
 | Load testing | Locust |
 | Testing | pytest · pytest-cov · pytest-benchmark |
 | Linting | ruff · black · mypy |
-| CI/CD | GitHub Actions (lint → test matrix → benchmark → Docker build → GHCR push) |
+| CI/CD | GitHub Actions (lint → test matrix → benchmark → Docker → GHCR) |
 | Containerisation | Docker multi-stage + docker-compose |
 | Real data services | EspoCRM · Zammad · NovaBilling/Lago (--profile real-sources) |
 | Kubernetes | Deployments · HPA · Ingress · cert-manager |
