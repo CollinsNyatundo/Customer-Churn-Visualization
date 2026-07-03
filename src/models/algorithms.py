@@ -18,25 +18,29 @@ Algorithms
 from __future__ import annotations
 
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 
 from src.config import settings
 
 
 def _preprocessor(numeric_cols: list[str], categorical_cols: list[str]) -> ColumnTransformer:
-    num_pipe = Pipeline([
-        ("imp", SimpleImputer(strategy="median")),
-        ("sc",  StandardScaler()),
-    ])
-    cat_pipe = Pipeline([
-        ("imp", SimpleImputer(strategy="constant", fill_value="unknown")),
-        ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-    ])
+    num_pipe = Pipeline(
+        [
+            ("imp", SimpleImputer(strategy="median")),
+            ("sc", StandardScaler()),
+        ]
+    )
+    cat_pipe = Pipeline(
+        [
+            ("imp", SimpleImputer(strategy="constant", fill_value="unknown")),
+            ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ]
+    )
     return ColumnTransformer(
         [("num", num_pipe, numeric_cols), ("cat", cat_pipe, categorical_cols)],
         remainder="drop",
@@ -99,6 +103,7 @@ def build_xgboost(
     params: dict | None = None,
 ) -> Pipeline:
     from xgboost import XGBClassifier
+
     p = params or {}
     clf = XGBClassifier(
         n_estimators=p.get("n_estimators", 300),
@@ -106,7 +111,7 @@ def build_xgboost(
         max_depth=p.get("max_depth", 4),
         subsample=p.get("subsample", 0.8),
         colsample_bytree=p.get("colsample_bytree", 0.8),
-        scale_pos_weight=p.get("scale_pos_weight", 8),   # handles 11% churn
+        scale_pos_weight=p.get("scale_pos_weight", 8),  # handles 11% churn
         eval_metric="logloss",
         random_state=settings.model_random_state,
         n_jobs=-1,
@@ -121,6 +126,7 @@ def build_lightgbm(
     params: dict | None = None,
 ) -> Pipeline:
     from lightgbm import LGBMClassifier
+
     p = params or {}
     clf = LGBMClassifier(
         n_estimators=p.get("n_estimators", 300),
@@ -143,6 +149,7 @@ def build_catboost(
     params: dict | None = None,
 ) -> Pipeline:
     from catboost import CatBoostClassifier
+
     p = params or {}
     # CatBoost handles categoricals natively — pass indices after preprocessing
     clf = CatBoostClassifier(
@@ -163,24 +170,20 @@ def build_mlp(
 ) -> Pipeline:
     """
     3-layer MLP via sklearn MLPClassifier.
-    Layer sizes are proportional to feature count for generalisability.
+    Fixed funnel (128→64→32). LR=0.01 ensures convergence in 500 iters.
     """
     p = params or {}
     n_features = len(num_cols) + len(cat_cols)
-    hidden = p.get("hidden_layer_sizes", (
-        min(256, n_features * 2),
-        min(128, n_features),
-        64,
-    ))
     clf = MLPClassifier(
-        hidden_layer_sizes=hidden,
+        hidden_layer_sizes=p.get("hidden_layer_sizes", (128, 64, 32)),  # proper funnel
         activation=p.get("activation", "relu"),
-        learning_rate_init=p.get("learning_rate_init", 0.001),
-        alpha=p.get("alpha", 0.01),       # L2 regularisation
-        batch_size=p.get("batch_size", 256),
-        max_iter=p.get("max_iter", 200),
+        learning_rate_init=p.get("learning_rate_init", 0.01),  # was 0.001, too low
+        alpha=p.get("alpha", 0.001),
+        batch_size=p.get("batch_size", 128),
+        max_iter=p.get("max_iter", 500),
         early_stopping=True,
-        validation_fraction=0.1,
+        validation_fraction=0.15,
+        n_iter_no_change=20,
         random_state=settings.model_random_state,
     )
     return Pipeline([("pre", _preprocessor(num_cols, cat_cols)), ("clf", clf)])
@@ -188,10 +191,10 @@ def build_mlp(
 
 ALGORITHM_REGISTRY = {
     "LogisticRegression": build_logistic_regression,
-    "RandomForest":       build_random_forest,
-    "GradientBoosting":   build_gradient_boosting,
-    "XGBoost":            build_xgboost,
-    "LightGBM":           build_lightgbm,
-    "CatBoost":           build_catboost,
-    "MLP":                build_mlp,
+    "RandomForest": build_random_forest,
+    "GradientBoosting": build_gradient_boosting,
+    "XGBoost": build_xgboost,
+    "LightGBM": build_lightgbm,
+    "CatBoost": build_catboost,
+    "MLP": build_mlp,
 }

@@ -8,12 +8,12 @@ Usage
     from src.models.optimization import optimise
     best_params = optimise("XGBoost", X_train, y_train, n_trials=50)
 """
+
 from __future__ import annotations
 
 import logging
 import warnings
 
-import numpy as np
 import optuna
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 
@@ -33,44 +33,44 @@ def _objective(trial, algorithm: str, X, y, cv) -> float:
 
     elif algorithm == "RandomForest":
         params = {
-            "n_estimators":   trial.suggest_int("n_estimators", 100, 500),
-            "max_depth":      trial.suggest_int("max_depth", 4, 12),
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+            "max_depth": trial.suggest_int("max_depth", 4, 12),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 5, 50),
         }
 
     elif algorithm == "GradientBoosting":
         params = {
-            "n_estimators":  trial.suggest_int("n_estimators", 100, 500),
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "max_depth":     trial.suggest_int("max_depth", 2, 6),
-            "subsample":     trial.suggest_float("subsample", 0.6, 1.0),
+            "max_depth": trial.suggest_int("max_depth", 2, 6),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
         }
 
     elif algorithm == "XGBoost":
         params = {
-            "n_estimators":    trial.suggest_int("n_estimators", 100, 500),
-            "learning_rate":   trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "max_depth":       trial.suggest_int("max_depth", 3, 8),
-            "subsample":       trial.suggest_float("subsample", 0.6, 1.0),
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "max_depth": trial.suggest_int("max_depth", 3, 8),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
             "scale_pos_weight": trial.suggest_float("scale_pos_weight", 4, 15),
         }
 
     elif algorithm == "LightGBM":
         params = {
-            "n_estimators":  trial.suggest_int("n_estimators", 100, 500),
+            "n_estimators": trial.suggest_int("n_estimators", 100, 500),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "max_depth":     trial.suggest_int("max_depth", 3, 8),
-            "num_leaves":    trial.suggest_int("num_leaves", 15, 63),
-            "subsample":     trial.suggest_float("subsample", 0.6, 1.0),
+            "max_depth": trial.suggest_int("max_depth", 3, 8),
+            "num_leaves": trial.suggest_int("num_leaves", 15, 63),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
         }
 
     elif algorithm == "CatBoost":
         params = {
-            "iterations":    trial.suggest_int("iterations", 100, 500),
+            "iterations": trial.suggest_int("iterations", 100, 500),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "depth":         trial.suggest_int("depth", 4, 8),
+            "depth": trial.suggest_int("depth", 4, 8),
         }
 
     elif algorithm == "MLP":
@@ -79,7 +79,7 @@ def _objective(trial, algorithm: str, X, y, cv) -> float:
         n3 = trial.suggest_int("layer3", 16, 64)
         params = {
             "hidden_layer_sizes": (n1, n2, n3),
-            "alpha":              trial.suggest_float("alpha", 1e-4, 0.1, log=True),
+            "alpha": trial.suggest_float("alpha", 1e-4, 0.1, log=True),
             "learning_rate_init": trial.suggest_float("lr", 1e-4, 1e-2, log=True),
         }
     else:
@@ -130,6 +130,9 @@ def optimise(
     )
     log.info(
         "Optuna %s: best AUC=%.4f in %d trials. Params: %s",
-        algorithm, study.best_value, n_trials, study.best_params,
+        algorithm,
+        study.best_value,
+        n_trials,
+        study.best_params,
     )
     return study.best_params

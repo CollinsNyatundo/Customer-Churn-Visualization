@@ -107,3 +107,32 @@ def full_pipeline_flow(
 
 if __name__ == "__main__":
     full_pipeline_flow()
+
+
+@flow(
+    name="churn-performance-check",
+    description="Check rolling model performance and trigger retraining if degraded.",
+    version="1.0.0",
+)
+def performance_check_flow(window_days: int = 30, auto_retrain: bool = False) -> dict:
+    """
+    Compute rolling precision/recall/AUC/Brier.
+    If degraded and auto_retrain=True, triggers full_pipeline_flow().
+    """
+    from prefect.logging import get_run_logger
+
+    run_log = get_run_logger()
+
+    from src.monitoring.performance import PerformanceMonitor
+
+    monitor = PerformanceMonitor()
+    metrics = monitor.compute_metrics(window_days=window_days)
+    alerts = monitor.alert_if_degraded(metrics)
+
+    run_log.info("Performance check complete: %s", metrics)
+
+    if alerts and auto_retrain:
+        run_log.warning("Degradation detected — triggering retraining: %s", alerts)
+        full_pipeline_flow(train=True, build_stack=True)
+
+    return {"metrics": metrics, "alerts": alerts}

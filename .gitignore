@@ -64,3 +64,8 @@ catboost_info/
 models/*.pkl
 models/*.joblib
 models/*.cb
+
+# Local test databases
+mlflow*.db
+mlruns/
+catboost_info/

@@ -26,6 +26,7 @@ from urllib.parse import urljoin
 
 import pandas as pd
 
+from src.data.sources._resilience import resilient_get
 from src.data.sources.base import BaseDataSource
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,6 @@ class CRMApiDataSource(BaseDataSource):
             )
 
     def _get(self, endpoint: str, params: dict | None = None) -> dict[str, Any]:
-        import json
-        import urllib.request
 
         url = urljoin(self.url + "/api/v1/", endpoint)
         if params:
@@ -66,9 +65,11 @@ class CRMApiDataSource(BaseDataSource):
 
             url += "?" + urlencode(params)
 
-        req = urllib.request.Request(url, headers={"X-Api-Key": self.api_key})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+        return resilient_get(
+            url,
+            headers={"X-Api-Key": self.api_key},
+            source_name="espocrm",
+        )
 
     def _fetch_all(self, entity: str, select: list[str]) -> list[dict]:
         """Paginate through all records of a given EspoCRM entity."""

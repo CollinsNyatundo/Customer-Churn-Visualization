@@ -1,6 +1,35 @@
 stages:
-  extract:
-    cmd: python -m src.pipeline.flows
+  raw_validation:
+    cmd: python -c "
+from src.data.sources.bcg_source import BCGClientSource, BCGPriceSource
+from src.data.quality import validate_source
+from src.data.preprocessing import clean_client_data
+c, _ = BCGClientSource().load()
+p, _ = BCGPriceSource().load()
+validate_source(c, 'bcg_client', strict=True)
+print(f'Raw validation passed: {len(c)} clients, {len(p)} price rows')
+"
+    deps:
+      - src/data/sources/bcg_source.py
+      - src/data/quality.py
+      - data/raw/client_data.csv
+      - data/raw/price_data.csv
+    outs:
+      - reports/raw_validation.json
+
+  merge:
+    cmd: python -c "
+from src.data.pipeline import MultiSourcePipeline
+from src.data.sources.bcg_source import BCGClientSource, BCGPriceSource
+import json, pandas as pd
+pipeline = MultiSourcePipeline(
+    client_source=BCGClientSource(), price_source=BCGPriceSource()
+)
+df, meta = pipeline.run()
+df.to_parquet('data/processed/merged.parquet', index=False)
+json.dump(meta, open('reports/merge_meta.json','w'), indent=2, default=str)
+print(f'Merged: {df.shape}')
+"
     deps:
       - src/data/pipeline.py
       - src/data/preprocessing.py
@@ -8,32 +37,74 @@ stages:
       - data/raw/client_data.csv
       - data/raw/price_data.csv
     outs:
-      - data/processed/merged_features.parquet
+      - data/processed/merged.parquet
+      - reports/merge_meta.json
 
-  featurise:
+  feature_engineering:
     cmd: python -c "
-      import pandas as pd
-      from src.features.engineering import build_feature_set
-      df = pd.read_parquet('data/processed/merged_features.parquet')
-      build_feature_set(df).to_parquet('data/processed/featured.parquet', index=False)
-      "
+import pandas as pd, json
+from src.features.engineering import build_feature_set, FeatureThresholds, FEATURE_ENGINEERING_VERSION
+from src.models.feature_contract import feature_schema_hash
+
+df = pd.read_parquet('data/processed/merged.parquet')
+thresholds = FeatureThresholds.from_dataframe(df)
+featured = build_feature_set(df, thresholds=thresholds)
+featured.to_parquet('data/processed/featured.parquet', index=False)
+
+lineage = {
+    'fe_version': FEATURE_ENGINEERING_VERSION,
+    'schema_hash': feature_schema_hash(featured),
+    'n_rows': len(featured),
+    'n_cols': len(featured.columns),
+    'thresholds': {
+        'high_consumption': thresholds.high_consumption_threshold,
+        'low_margin': thresholds.low_margin_threshold,
+        'high_tickets': thresholds.high_tickets_threshold,
+        'high_outstanding': thresholds.high_outstanding_threshold,
+    }
+}
+json.dump(lineage, open('reports/feature_lineage.json','w'), indent=2)
+print(f'Featured: {featured.shape}, hash={lineage[\"schema_hash\"]}')
+"
     deps:
       - src/features/engineering.py
-      - data/processed/merged_features.parquet
+      - src/models/feature_contract.py
+      - data/processed/merged.parquet
     outs:
       - data/processed/featured.parquet
+      - reports/feature_lineage.json
+
+  feast_sink:
+    cmd: python -c "
+import pandas as pd
+from src.data.feast_sink import write_feast_parquet
+df = pd.read_parquet('data/processed/featured.parquet')
+written = write_feast_parquet(df)
+print('Feast parquets:', list(written.keys()))
+"
+    deps:
+      - src/data/feast_sink.py
+      - data/processed/featured.parquet
+    outs:
+      - data/feast/
 
   train:
     cmd: python -c "
-      import pandas as pd
-      from src.models.churn_model import train
-      df = pd.read_parquet('data/processed/featured.parquet')
-      run_id = train(df)
-      print('MLflow run_id:', run_id)
-      "
+import pandas as pd, json
+from src.models.churn_model import train
+df = pd.read_parquet('data/processed/featured.parquet')
+run_id = train(df, optimise_best=False, build_stack=True)
+lineage = json.load(open('reports/feature_lineage.json'))
+lineage['mlflow_run_id'] = run_id
+json.dump(lineage, open('reports/model_lineage.json','w'), indent=2)
+print(f'Training complete. run_id={run_id}')
+"
     deps:
       - src/models/churn_model.py
+      - src/models/algorithms.py
+      - src/models/ensemble.py
+      - src/models/threshold.py
+      - src/models/feature_contract.py
       - data/processed/featured.parquet
-    metrics:
-      - reports/metrics.json:
-          cache: false
+    outs:
+      - reports/model_lineage.json

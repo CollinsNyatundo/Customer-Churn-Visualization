@@ -27,13 +27,12 @@ Falls back to synthetic BillingSource if no billing URL is configured.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import urllib.request
 
 import pandas as pd
 
+from src.data.sources._resilience import resilient_get
 from src.data.sources.base import BaseDataSource
 
 logger = logging.getLogger(__name__)
@@ -79,9 +78,11 @@ class BillingApiDataSource(BaseDataSource):
             from urllib.parse import urlencode
 
             url += "?" + urlencode(params)
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.api_key}"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+        return resilient_get(
+            url,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            source_name="novabilling",
+        )
 
     def _fetch_novabilling(self) -> pd.DataFrame:
         customers = self._get("/customers", {"page": 1, "per_page": 1000}).get("data", [])

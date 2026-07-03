@@ -19,14 +19,13 @@ Falls back to synthetic SupportSource if ZAMMAD_URL is not set.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import urllib.request
 from collections import defaultdict
 
 import pandas as pd
 
+from src.data.sources._resilience import resilient_get
 from src.data.sources.base import BaseDataSource
 
 logger = logging.getLogger(__name__)
@@ -62,9 +61,11 @@ class SupportApiDataSource(BaseDataSource):
             from urllib.parse import urlencode
 
             url += "?" + urlencode(params)
-        req = urllib.request.Request(url, headers={"Authorization": f"Token token={self.token}"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
+        return resilient_get(
+            url,
+            headers={"Authorization": f"Token token={self.token}"},
+            source_name="zammad",
+        )
 
     def _fetch_tickets(self) -> list[dict]:
         cutoff = (pd.Timestamp.today() - pd.DateOffset(months=6)).isoformat()

@@ -118,8 +118,11 @@ def log_params(params: dict[str, Any]) -> None:
 
 def register_model(run_id: str, model_uri_suffix: str = "model", stage: str = "Staging") -> None:
     """
-    Register a logged sklearn model and promote it to the given stage.
-    Raises on failure — never silently skips.
+    Promote the model version associated with run_id to the given stage.
+
+    If log_model() was called with registered_model_name= (the standard path
+    in churn_model.py), the model version already exists — this only
+    transitions its stage. Falls back to explicit registration if needed.
     """
     if _is_offline():
         log.warning("MLflow offline — model registration skipped for run_id=%s", run_id)
@@ -133,13 +136,27 @@ def register_model(run_id: str, model_uri_suffix: str = "model", stage: str = "S
 
     client = MlflowClient(tracking_uri=settings.mlflow_tracking_uri)
     name = settings.mlflow_registered_model_name
-    model_uri = f"runs:/{run_id}/{model_uri_suffix}"
 
+    # Find the model version created by this run (via registered_model_name=
+    # in log_model), rather than creating a duplicate registration.
+    try:
+        versions = client.search_model_versions(f"run_id='{run_id}'")
+        matching = [v for v in versions if v.name == name]
+        if matching:
+            mv = matching[0]
+            client.transition_model_version_stage(name=name, version=mv.version, stage=stage)
+            log.info("Model '%s' v%s promoted to %s", name, mv.version, stage)
+            return
+    except Exception as e:
+        log.debug("search_model_versions lookup failed, falling back: %s", e)
+
+    # Fallback: explicit registration (older MLflow / offline artifact path)
+    model_uri = f"runs:/{run_id}/{model_uri_suffix}"
     try:
         client.create_registered_model(name)
     except Exception:
-        pass  # Already exists — expected on subsequent runs
+        pass  # Already exists
 
     mv = client.create_model_version(name=name, source=model_uri, run_id=run_id)
     client.transition_model_version_stage(name=name, version=mv.version, stage=stage)
-    log.info("Model '%s' v%s promoted to %s", name, mv.version, stage)
+    log.info("Model '%s' v%s promoted to %s (fallback path)", name, mv.version, stage)

@@ -64,3 +64,6 @@ xgboost==3.3.0
 lightgbm==4.6.0
 catboost==1.2.10
 optuna==4.9.0
+tenacity==9.1.0
+slowapi==0.1.9
+pandera==0.32.1

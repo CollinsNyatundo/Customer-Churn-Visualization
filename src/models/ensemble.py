@@ -13,6 +13,7 @@ This is harder to overfit than simple averaging because:
   - Meta-learner learns optimal weighting from held-out predictions
   - Diverse algorithms cover different parts of the hypothesis space
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,18 +68,31 @@ class StackingEnsemble:
         n = len(X)
         oof_preds = np.zeros((n, len(self._base_names)))
 
-        log.info("Stacking: generating out-of-fold predictions (%d base learners, %d folds)...",
-                 len(self._base_names), self.cv_folds)
+        log.info(
+            "Stacking: generating out-of-fold predictions (%d base learners, %d folds)...",
+            len(self._base_names),
+            self.cv_folds,
+        )
 
         for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X, y)):
             X_tr, X_val = X.iloc[train_idx], X.iloc[val_idx]
-            y_tr        = y.iloc[train_idx]
+            y_tr = y.iloc[train_idx]
 
             for col_idx, (name, pipeline) in enumerate(self.base_pipelines.items()):
                 import copy
+
                 fold_pipe = copy.deepcopy(pipeline)
-                fold_pipe.fit(X_tr, y_tr)
-                oof_preds[val_idx, col_idx] = fold_pipe.predict_proba(X_val)[:, 1]
+                try:
+                    fold_pipe.fit(X_tr, y_tr)
+                    oof_preds[val_idx, col_idx] = fold_pipe.predict_proba(X_val)[:, 1]
+                except Exception as e:
+                    log.warning(
+                        "Base learner '%s' failed on fold %d — using 0.5 fallback: %s",
+                        name,
+                        fold_idx + 1,
+                        e,
+                    )
+                    oof_preds[val_idx, col_idx] = 0.5  # neutral fallback
 
             log.debug("Stacking fold %d/%d complete", fold_idx + 1, self.cv_folds)
 
@@ -89,8 +103,7 @@ class StackingEnsemble:
             random_state=settings.model_random_state,
         )
         self._meta.fit(oof_preds, y)
-        log.info("Meta-learner weights: %s",
-                 dict(zip(self._base_names, self._meta.coef_[0].round(4))))
+        log.info("Meta-learner weights: %s", dict(zip(self._base_names, self._meta.coef_[0].round(4))))
 
         # Refit all base learners on full training data
         for name, pipeline in self.base_pipelines.items():
@@ -104,10 +117,7 @@ class StackingEnsemble:
         if not self._fitted_bases or self._meta is None:
             raise RuntimeError("StackingEnsemble not fitted. Call fit() first.")
 
-        base_preds = np.column_stack([
-            self._fitted_bases[name].predict_proba(X)[:, 1]
-            for name in self._base_names
-        ])
+        base_preds = np.column_stack([self._fitted_bases[name].predict_proba(X)[:, 1] for name in self._base_names])
         probs_churn = self._meta.predict_proba(base_preds)[:, 1]
         return np.column_stack([1 - probs_churn, probs_churn])
 

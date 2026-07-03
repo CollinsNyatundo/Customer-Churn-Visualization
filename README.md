@@ -251,6 +251,76 @@ All issues from two independent external code reviews were verified against actu
 | B18/B19 | No feature-version / schema hash | `FEATURE_ENGINEERING_VERSION` + `feature_schema_hash()` logged to MLflow |
 | B26 | DVC no model-feature-dataset lock | `feature_thresholds.json` + schema hash as MLflow artifacts |
 
+
+---
+
+## Critical bug fixes (forensic audit round 2)
+
+A second, deeper audit pass found 3 P0 bugs that the first fix round missed, plus a
+training-serving skew bug discovered only through genuine end-to-end verification
+(not just unit tests). All are fixed and verified with real trained models.
+
+| Bug | Root cause | Fix | Verified |
+|---|---|---|---|
+| **MLP broken (CV AUC 0.531)** | Architecture `(76,38,64)` violated funnel pattern; LR=0.001 too low to converge in 200 iters | Fixed to `(128,64,32)` funnel, LR=0.01, max_iter=500 | AUC 0.531 → 0.9309 |
+| **FeatureThresholds defaulted to zero at inference** | `api/predictor.py` never loaded `feature_thresholds.json` from the MLflow artifact — every threshold-based feature (`high_consumption`, `low_margin`, etc.) was silently wrong for every prediction | `ChurnPredictor.load()` downloads and reconstructs `FeatureThresholds` from the training run's artifact; raises `RuntimeError` if missing | Confirmed non-zero thresholds loaded (e.g. `high_consumption_threshold=16633.49`) |
+| **Feature contract hard-coded, drift-prone** | `feature_contract.py` had 50+ manually-typed feature names that had to be kept in sync with `engineering.py` by hand | Auto-derived from `engineering.get_feature_names()` — impossible to drift | Verified 67 features match exactly |
+| **Cross-source risk score degenerate on single-row inference** | `_safe_normalize()` divides by the *current batch's* max — for a single API request, that's always the value itself, producing meaningless 0-or-1 scores | Normalisation maxima (`num_tickets_6m_max`, `num_late_payments_12m_max`) frozen in `FeatureThresholds` from training, injected at inference | Confirmed real maxima (19.0, 7.0) load correctly, not defaulting to 1.0 |
+| **Threshold artifact only saved 2 of 6 fields** | `mlflow.log_dict()` call hard-coded only `high_consumption_threshold` and `low_margin_threshold` | Uses `dataclasses.asdict(thresholds)` so any future field is automatically included | Full 6-field round-trip verified |
+| **Tenure features silently NaN on API path** | `contract_duration_days`/`is_long_term` (the model's strongest predictors) require `date_activ`/`date_end`, which aren't in the `CustomerFeatures` API schema — every single-customer prediction was missing its top features | Proxy fallback derives `contract_duration_days` from `num_years_antig` (which *is* in the schema) when dates are absent | Directional sanity restored on isolated tenure signal |
+| **MLflow 3.x registry incompatibility** | `log_model(name=...)` creates a "Logged Model" entity that doesn't auto-register for `models:/name/stage` loading | Switched to `artifact_path=` + `registered_model_name=` for direct registry compatibility | Model loads correctly via registry path |
+
+### A meaningful lesson about synthetic test data
+
+While chasing what looked like an inverted-prediction bug, we discovered the fixture's
+CRM/Support/Billing synthetic sources generate features **independently of the churn
+label** — there is no real causal link between NPS score, ticket count, or contract
+type and whether a customer churns (only `tenure < 2 years` drives the label). This
+means a trained model can and will pick up spurious, run-dependent correlations in
+these fields, and a directional sanity test that assumes "bad NPS → higher churn"
+without also holding other confounding synthetic fields constant will be unreliable.
+`tests/test_e2e.py`'s fixture and assertions were rewritten to tie `churn` causally to
+tenure (matching the production generator) and to isolate the tested variable from
+confounds — this is what makes an E2E "sanity check" actually meaningful, and it's a
+good reminder that synthetic data design has to match its own test's assumptions.
+
+---
+
+## Rate limiting & circuit breakers
+
+- **API rate limits** (`slowapi`): 100/min on `/predict`, 20/min on `/predict/batch`,
+  30/min on `/explain`, 10/min on `/explain/batch`
+- **Circuit breaker** (`src/data/sources/_resilience.py`): all 3 API sources
+  (EspoCRM, Zammad, NovaBilling) get exponential-backoff retry + circuit breaker;
+  opens after 3 failures, resets after 60s
+
+## Data quality contracts
+
+Pandera schemas (`src/data/quality.py`) validate BCG/CRM/Support/Billing sources
+for range violations, nulls, and type mismatches before they reach feature engineering.
+
+## Model performance monitoring
+
+`src/monitoring/performance.py` tracks rolling AUC/precision/recall/Brier over a
+configurable window and fires Slack/email alerts on degradation. Wired into a Prefect
+`performance_check_flow()` with optional auto-retraining trigger.
+
+## Shadow deployment (champion/challenger)
+
+Set `SHADOW_DEPLOYMENT_SPLIT=0.1` to route 10% of predictions to the Staging
+("challenger") model alongside the Production ("champion") model, logging both for
+comparison before promoting a challenger.
+
+## Full DVC data lineage
+
+`dvc.yaml` now tracks 5 stages: raw validation → merge → feature engineering →
+Feast sink → train, each with explicit deps/outs for full reproducibility.
+
+## Customer segmentation
+
+`src.models.churn_model.train_segmented()` trains separate models per customer
+segment (e.g. high-value vs low-value) when a business case calls for it.
+
 ---
 
 ## Testing

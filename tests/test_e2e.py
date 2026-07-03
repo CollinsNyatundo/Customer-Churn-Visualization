@@ -33,22 +33,33 @@ from src.features.engineering import FeatureThresholds, build_feature_set
 
 @pytest.fixture(scope="module")
 def real_df():
-    """500-row fully-featured DataFrame built through the real pipeline."""
+    """
+    500-row fully-featured DataFrame built through the real pipeline.
+
+    churn is causally tied to tenure (num_years_antig < 2 -> elevated churn
+    probability), mirroring the production data generator. Without a genuine
+    feature-label relationship, a trained model has nothing but noise to
+    learn from, making any directional sanity test structurally unreliable.
+    """
     rng = np.random.default_rng(42)
-    n = 500
+    n = 2000
     ids = [f"e2e_{i:04d}" for i in range(n)]
+
+    tenure = rng.uniform(0.1, 14, n)
+    churn_prob = 0.05 + 0.35 * (tenure < 2).astype(float) + 0.05 * rng.uniform(0, 1, n)
+    churn = rng.binomial(1, churn_prob.clip(0, 0.9), n)
 
     client_df = pd.DataFrame(
         {
             "id": ids,
-            "churn": rng.choice([0, 1], n, p=[0.88, 0.12]),
+            "churn": churn,
             "cons_12m": rng.exponential(10000, n).clip(0),
             "cons_gas_12m": rng.exponential(2000, n).clip(0),
             "cons_last_month": rng.exponential(900, n).clip(0),
             "imp_cons": rng.exponential(500, n).clip(0),
             "net_margin": rng.normal(200, 80, n),
             "margin_gross_pow_ele": rng.normal(150, 60, n),
-            "num_years_antig": rng.integers(1, 15, n).astype(float),
+            "num_years_antig": tenure.round(2),
             "pow_max": rng.exponential(40, n).clip(1),
             "nb_prod_act": rng.integers(1, 5, n),
             "forecast_discount_energy": rng.uniform(0, 0.3, n),
@@ -105,7 +116,7 @@ def trained_pipeline(real_df):
         ]
     )
     pre = ColumnTransformer([("num", num_pipe, avail_num), ("cat", cat_pipe, avail_cat)], remainder="drop")
-    clf = GradientBoostingClassifier(n_estimators=50, random_state=42)
+    clf = GradientBoostingClassifier(n_estimators=150, max_depth=3, random_state=42)
     pipeline = Pipeline([("pre", pre), ("clf", clf)])
     pipeline.fit(X, y)
     return pipeline, avail_num, avail_cat
@@ -187,8 +198,11 @@ class TestAPIWithRealModel:
 
         real_predictor = ChurnPredictor.__new__(ChurnPredictor)
         real_predictor._pipeline = pipeline
+        real_predictor._challenger = None
         real_predictor._model_version = "e2e-test-v1"
+        real_predictor._challenger_version = "unknown"
         real_predictor._thresholds = thresholds
+        real_predictor._use_feast = False
         real_predictor.stage = "test"
 
         with patch("api.main.get_predictor", return_value=real_predictor):
@@ -203,28 +217,53 @@ class TestAPIWithRealModel:
         assert 0 <= prob <= 1
 
     def test_high_risk_profile_scores_higher(self, client_real):
-        low_risk = client_real.post(
-            "/predict",
-            json={
-                "nps_score": 90,
-                "satisfaction_score": 4.8,
-                "num_late_payments_12m": 0,
-                "contract_type": "two-year",
-            },
-        ).json()["churn_probability"]
+        """
+        Directional sanity check, averaged over multiple samples to reduce
+        single-instance noise sensitivity. num_years_antig (tenure) is
+        varied because it is the fixture's actual causal churn driver (see
+        real_df fixture: tenure < 2 years -> elevated churn probability).
+        A single hand-picked pair can land on a noisy decision-boundary
+        instance; averaging several short- vs long-tenure profiles gives
+        a statistically reliable directional signal.
+        """
+        short_tenure_values = [0.3, 0.6, 0.9, 1.2, 1.5]
+        long_tenure_values = [6, 7, 8, 9, 10]
 
-        high_risk = client_real.post(
-            "/predict",
-            json={
-                "nps_score": -90,
-                "satisfaction_score": 1.1,
-                "num_late_payments_12m": 7,
-                "contract_type": "month-to-month",
-            },
-        ).json()["churn_probability"]
+        # contract_type is held fixed across both groups — it is an
+        # independently-random CRM field with no causal link to churn in
+        # the fixture, and letting it vary between groups confounds the
+        # tenure signal being tested.
+        high_risk_probs = [
+            client_real.post(
+                "/predict",
+                json={
+                    "num_years_antig": t,
+                    "nps_score": -90,
+                    "satisfaction_score": 1.1,
+                    "num_late_payments_12m": 7,
+                    "contract_type": "one-year",
+                },
+            ).json()["churn_probability"]
+            for t in short_tenure_values
+        ]
+        low_risk_probs = [
+            client_real.post(
+                "/predict",
+                json={
+                    "num_years_antig": t,
+                    "nps_score": 90,
+                    "satisfaction_score": 4.8,
+                    "num_late_payments_12m": 0,
+                    "contract_type": "one-year",
+                },
+            ).json()["churn_probability"]
+            for t in long_tenure_values
+        ]
 
-        assert high_risk > low_risk, (
-            f"High-risk profile ({high_risk:.3f}) should score higher " f"than low-risk ({low_risk:.3f})"
+        avg_high, avg_low = sum(high_risk_probs) / len(high_risk_probs), sum(low_risk_probs) / len(low_risk_probs)
+        assert avg_high > avg_low, (
+            f"Short-tenure profiles (avg={avg_high:.3f}) should score higher "
+            f"than long-tenure profiles (avg={avg_low:.3f})"
         )
 
     def test_batch_same_as_individual(self, client_real):

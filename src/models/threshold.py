@@ -9,12 +9,12 @@ The default 0.5 threshold maximises accuracy but is often wrong for churn:
 
 This module finds the threshold that optimises a configurable business metric.
 """
+
 from __future__ import annotations
 
 import logging
 
 import numpy as np
-from sklearn.metrics import f1_score, precision_recall_curve
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def optimise_threshold(
         tn = int(((y_pred == 0) & (y_true == 0)).sum())
 
         precision = tp / max(tp + fp, 1)
-        recall    = tp / max(tp + fn, 1)
+        recall = tp / max(tp + fn, 1)
 
         if metric == "f1":
             value = 2 * precision * recall / max(precision + recall, 1e-9)
@@ -74,7 +74,9 @@ def optimise_threshold(
 
     log.info(
         "Threshold optimised for '%s': threshold=%.3f, value=%.4f",
-        metric, best_threshold, best_value,
+        metric,
+        best_threshold,
+        best_value,
     )
     return best_threshold, best_value
 
@@ -91,15 +93,17 @@ def threshold_sweep(y_true: np.ndarray, y_prob: np.ndarray) -> list[dict]:
         fp = int(((y_pred == 1) & (y_true == 0)).sum())
         fn = int(((y_pred == 0) & (y_true == 1)).sum())
         precision = tp / max(tp + fp, 1)
-        recall    = tp / max(tp + fn, 1)
+        recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-9)
-        rows.append({
-            "threshold":  round(t, 2),
-            "precision":  round(precision, 4),
-            "recall":     round(recall, 4),
-            "f1":         round(f1, 4),
-            "flagged":    int(y_pred.sum()),
-            "caught_churners": tp,
-            "missed_churners": fn,
-        })
+        rows.append(
+            {
+                "threshold": round(t, 2),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "flagged": int(y_pred.sum()),
+                "caught_churners": tp,
+                "missed_churners": fn,
+            }
+        )
     return rows

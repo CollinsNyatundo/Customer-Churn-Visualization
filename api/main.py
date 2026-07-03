@@ -17,6 +17,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from api.auth import _load_valid_keys, verify_api_key
 from api.explain import explain_prediction
@@ -30,6 +33,8 @@ from api.schemas import (
 )
 from src.config import settings
 from src.logging_config import configure_logging
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 configure_logging(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -84,6 +89,9 @@ app = FastAPI(
 _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 if "*" in _cors_origins and settings.env == "production":
     log.error("CORS is wide open (allow_origins=['*']) in ENV=production. Set CORS_ORIGINS.")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -148,7 +156,9 @@ async def health() -> HealthResponse:
 
 
 @app.post("/predict", response_model=PredictionResponse, tags=["prediction"])
+@limiter.limit("100/minute")
 async def predict(
+    request: Request,
     customer: CustomerFeatures,
     _: str = Depends(verify_api_key),
 ) -> PredictionResponse:
@@ -171,7 +181,9 @@ async def predict(
 
 
 @app.post("/predict/batch", response_model=list[PredictionResponse], tags=["prediction"])
+@limiter.limit("20/minute")
 async def predict_batch(
+    request: Request,
     customers: list[CustomerFeatures],
     _: str = Depends(verify_api_key),
 ) -> list[PredictionResponse]:
@@ -207,7 +219,9 @@ async def predict_batch(
 
 
 @app.post("/explain", response_model=ExplainResponse, tags=["explainability"])
+@limiter.limit("30/minute")
 async def explain(
+    request: Request,
     customer: CustomerFeatures,
     top_n: int = 10,
     _: str = Depends(verify_api_key),
@@ -239,3 +253,46 @@ async def explain(
         model_version=predictor.model_version,
         top_features=[FeatureContribution(**c) for c in contributions],
     )
+
+
+@app.post("/explain/batch", response_model=list[ExplainResponse], tags=["explainability"])
+@limiter.limit("10/minute")
+async def explain_batch(
+    request: Request,
+    customers: list[CustomerFeatures],
+    top_n: int = 5,
+    _: str = Depends(verify_api_key),
+) -> list[ExplainResponse]:
+    """
+    SHAP explanations for a batch of customers (up to 50).
+    Required for compliance-grade explainability at scale.
+    """
+    if len(customers) > 50:
+        raise HTTPException(status_code=400, detail="Batch explain limit is 50.")
+    if not customers:
+        return []
+    try:
+        predictor = get_predictor()
+        results = []
+        for customer in customers:
+            prob, pred, tier = predictor.predict(customer.model_dump())
+            contributions = explain_prediction(
+                predictor.get_pipeline(),
+                customer.model_dump(),
+                top_n=min(top_n, 30),
+            )
+            results.append(
+                ExplainResponse(
+                    churn_probability=round(prob, 4),
+                    churn_prediction=pred,
+                    risk_tier=tier,
+                    model_version=predictor.model_version,
+                    top_features=[FeatureContribution(**c) for c in contributions],
+                )
+            )
+        return results
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        log.exception("Batch explain failed: %s", e)
+        raise HTTPException(status_code=500, detail="Batch explanation error.")

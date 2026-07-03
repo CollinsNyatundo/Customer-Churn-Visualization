@@ -46,6 +46,13 @@ class FeatureThresholds:
     high_tickets_threshold: float = 0.0
     high_outstanding_threshold: float = 0.0
 
+    # Normalisation maxima for cross_source_risk_score components.
+    # _safe_normalize(series) divides by series.max() — on a single-row
+    # inference request that degenerates to always-0-or-1. Freezing
+    # training-set maxima makes the risk score meaningful per-customer.
+    num_tickets_6m_max: float = 1.0
+    num_late_payments_12m_max: float = 1.0
+
     @classmethod
     def from_dataframe(cls, df: pd.DataFrame) -> "FeatureThresholds":
         return cls(
@@ -56,6 +63,16 @@ class FeatureThresholds:
             ),
             high_outstanding_threshold=(
                 float(df["total_outstanding"].quantile(0.75)) if "total_outstanding" in df.columns else 0.0
+            ),
+            num_tickets_6m_max=(
+                float(df["num_tickets_6m"].max())
+                if "num_tickets_6m" in df.columns and df["num_tickets_6m"].max() > 0
+                else 1.0
+            ),
+            num_late_payments_12m_max=(
+                float(df["num_late_payments_12m"].max())
+                if "num_late_payments_12m" in df.columns and df["num_late_payments_12m"].max() > 0
+                else 1.0
             ),
         )
 
@@ -107,6 +124,19 @@ def add_tenure_features(
             .round(4)
             .clip(0, 1)
         )
+    elif "num_years_antig" in df.columns:
+        # Proxy fallback for the single-customer API path: date_activ/date_end
+        # aren't in CustomerFeatures schema, but contract_duration_days and
+        # is_long_term are the model's strongest tenure predictors. Without
+        # this proxy they'd be NaN on every API prediction, silently
+        # crippling inference (the model would fall back to weaker signals).
+        log.debug(
+            "date_activ/date_end absent — deriving contract_duration_days "
+            "from num_years_antig proxy (API single-customer path)."
+        )
+        df["contract_duration_days"] = (df["num_years_antig"] * 365).clip(lower=0)
+        df["is_long_term"] = df["num_years_antig"] > 1.0
+        df["contract_completion_pct"] = np.nan  # genuinely unknowable without dates
 
     if "date_renewal" in df.columns:
         days_to_renewal = (df["date_renewal"] - ref).dt.days
@@ -310,10 +340,19 @@ def add_billing_features(
 # ── 6. Multi-source interaction features ─────────────────────────────────────
 
 
-def add_multisource_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_multisource_features(
+    df: pd.DataFrame,
+    thresholds: Optional["FeatureThresholds"] = None,
+) -> pd.DataFrame:
     """
     Cross-source risk and engagement scores.
-    Uses _safe_normalize() to guard against zero-max columns.
+
+    Normalisation maxima for num_tickets_6m and num_late_payments_12m are
+    frozen from the training set (via thresholds) when provided. Without
+    this, a single-row inference request would normalise against its own
+    value — always producing 0 or 1, which is meaningless. When thresholds
+    is None (e.g. during training before freezing), falls back to batch max.
+
     Scores are heuristic relative rankings, not calibrated probabilities.
     """
     df = df.copy()
@@ -323,9 +362,17 @@ def add_multisource_features(df: pd.DataFrame) -> pd.DataFrame:
     if "nps_score" in df.columns:
         risk_components.append((-df["nps_score"]).clip(lower=0).div(100).fillna(0.0))
     if "num_tickets_6m" in df.columns:
-        risk_components.append(_safe_normalize(df["num_tickets_6m"], "num_tickets_6m").fillna(0.0))
+        if thresholds is not None:
+            comp = (df["num_tickets_6m"] / thresholds.num_tickets_6m_max).clip(0, 1).fillna(0.0)
+        else:
+            comp = _safe_normalize(df["num_tickets_6m"], "num_tickets_6m").fillna(0.0)
+        risk_components.append(comp)
     if "num_late_payments_12m" in df.columns:
-        risk_components.append(_safe_normalize(df["num_late_payments_12m"], "num_late_payments_12m").fillna(0.0))
+        if thresholds is not None:
+            comp = (df["num_late_payments_12m"] / thresholds.num_late_payments_12m_max).clip(0, 1).fillna(0.0)
+        else:
+            comp = _safe_normalize(df["num_late_payments_12m"], "num_late_payments_12m").fillna(0.0)
+        risk_components.append(comp)
 
     if risk_components:
         df["cross_source_risk_score"] = np.mean(np.stack([c.values for c in risk_components], axis=1), axis=1).round(4)
@@ -398,7 +445,7 @@ def build_feature_set(
     df = add_margin_features(df, thresholds=thresholds)
     df = add_support_features(df, thresholds=thresholds)
     df = add_billing_features(df, thresholds=thresholds)
-    df = add_multisource_features(df)
+    df = add_multisource_features(df, thresholds=thresholds)
     df = add_source_flags(df)
     return df
 

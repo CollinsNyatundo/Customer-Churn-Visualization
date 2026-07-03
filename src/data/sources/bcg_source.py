@@ -16,9 +16,25 @@ class BCGClientSource(BaseDataSource):
         return pd.read_csv(self.path, parse_dates=self.DATE_COLS)
 
     def validate(self, df):
+        import logging
+
+        log = logging.getLogger(__name__)
         missing = self.REQUIRED_COLS - set(df.columns)
         if missing:
             raise ValueError(f"BCGClientSource missing: {missing}")
+        # Duplicate ID check
+        dupes = df["id"].duplicated().sum()
+        if dupes:
+            raise ValueError(f"BCGClientSource: {dupes} duplicate customer IDs")
+        # Date consistency
+        if "date_activ" in df.columns and "date_end" in df.columns:
+            bad = (df["date_end"] < df["date_activ"]).sum()
+            if bad:
+                log.warning("BCGClientSource: %d rows where date_end < date_activ", bad)
+        # Negative consumption
+        for col in ["cons_12m", "cons_gas_12m", "cons_last_month", "imp_cons"]:
+            if col in df.columns and (df[col] < 0).any():
+                log.warning("BCGClientSource: negative values in '%s'", col)
 
 
 class BCGPriceSource(BaseDataSource):
