@@ -148,6 +148,13 @@ class ChurnPredictor:
     def model_version(self) -> str:
         return self._model_version
 
+    @property
+    def thresholds(self) -> FeatureThresholds | None:
+        """Public accessor for frozen FeatureThresholds — used by explain.py
+        so SHAP explanations are computed with the same thresholds used at
+        training time, not defaults (which would repeat the P0.2 skew bug)."""
+        return self._thresholds
+
     def get_pipeline(self):
         """Public accessor — avoids _pipeline encapsulation breach."""
         if self._pipeline is None:
@@ -189,15 +196,34 @@ class ChurnPredictor:
         return featured
 
     def _expected_columns(self) -> list[str] | None:
-        """Extract the ColumnTransformer's expected input columns from the pipeline."""
+        """
+        Extract the ColumnTransformer's expected input columns from the
+        pipeline. Handles both plain sklearn Pipeline champions and
+        StackingEnsemble champions (which don't have .named_steps — the
+        expected columns are instead read from one of its base pipelines,
+        since all base learners in an ensemble share the same feature
+        contract by construction).
+        """
+        target = self._pipeline
+
+        # StackingEnsemble: read columns from any fitted base pipeline
+        if hasattr(target, "_fitted_bases") and target._fitted_bases:
+            target = next(iter(target._fitted_bases.values()))
+
         try:
-            pre = self._pipeline.named_steps.get("pre") or self._pipeline.named_steps.get("preprocessor")
+            pre = target.named_steps.get("pre") or target.named_steps.get("preprocessor")
             cols = []
             for _, _, col_list in pre.transformers:
                 if isinstance(col_list, list):
                     cols.extend(col_list)
             return cols
-        except Exception:
+        except Exception as e:
+            log.warning(
+                "Could not extract expected columns from pipeline (type=%s): %s. "
+                "NaN-reindex fallback for API-only fields will be skipped.",
+                type(self._pipeline).__name__,
+                e,
+            )
             return None
 
     def _tier(self, p: float) -> str:

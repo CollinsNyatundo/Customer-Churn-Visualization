@@ -5,12 +5,28 @@ Data drift detection using Evidently AI.
 Compares a reference dataset (training data) against a current
 production dataset and flags columns that have drifted.
 
+Rewritten for Evidently 0.7.x (code review fix)
+--------------------------------------------------
+Evidently made breaking API changes between 0.4.x and 0.7.x:
+  evidently.ColumnMapping              -> removed entirely (no legacy shim)
+  evidently.metric_preset.*            -> evidently.presets.*
+  evidently.report.Report              -> evidently.Report
+  report.run(..., column_mapping=...)  -> Dataset.from_pandas(df, data_definition=...)
+  report.as_dict()                     -> snapshot.dict()
+  metric name "DatasetDriftMetric"     -> "DriftedColumnsCount(drift_share=X)"
+
+The old API was never importable against the pinned evidently==0.7.21 in
+requirements.txt — this module could not be imported at all, meaning
+drift detection has been non-functional since it was written. This
+rewrite uses the current native API and was verified against a real
+Report.run() call.
+
 Usage
 -----
     from src.monitoring.drift import DriftDetector
     detector = DriftDetector(reference_df)
-    report = detector.run(current_df)
-    detector.save_report(report, "reports/drift_report.html")
+    snapshot = detector.run(current_df)
+    detector.save_report(snapshot, "reports/drift_report.html")
 """
 
 from __future__ import annotations
@@ -19,9 +35,8 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from evidently import ColumnMapping
-from evidently.metric_preset import DataDriftPreset, DataQualityPreset, TargetDriftPreset
-from evidently.report import Report
+from evidently import DataDefinition, Dataset, Report
+from evidently.presets import DataDriftPreset, DataSummaryPreset
 
 logger = logging.getLogger(__name__)
 
@@ -63,82 +78,82 @@ class DriftDetector:
 
     Parameters
     ----------
-    reference_df : the baseline dataset (e.g. training split)
+    reference_df : the baseline dataset (e.g. training split, or the
+                    snapshot saved by src.pipeline.tasks.save_reference_snapshot)
     """
 
     def __init__(self, reference_df: pd.DataFrame):
         self.reference_df = reference_df
-        self._column_mapping = ColumnMapping(
-            target="churn",
-            numerical_features=[c for c in NUMERIC_COLS if c in reference_df.columns],
-            categorical_features=[c for c in CATEGORICAL_COLS if c in reference_df.columns],
+        self._numeric_cols = [c for c in NUMERIC_COLS if c in reference_df.columns]
+        self._categorical_cols = [c for c in CATEGORICAL_COLS if c in reference_df.columns]
+        self._data_definition = DataDefinition(
+            numerical_columns=self._numeric_cols,
+            categorical_columns=self._categorical_cols,
         )
 
-    def run(self, current_df: pd.DataFrame) -> Report:
+    def run(self, current_df: pd.DataFrame):
         """
-        Run drift + quality + target drift analysis.
+        Run data drift + summary analysis.
 
         Returns
         -------
-        Evidently Report object (call .as_dict() or .save_html())
+        Evidently Snapshot object (call .dict(), .save_html(), or .json())
         """
         logger.info(
             "Running drift detection: reference=%d rows, current=%d rows",
             len(self.reference_df),
             len(current_df),
         )
-        report = Report(
-            metrics=[
-                DataDriftPreset(),
-                DataQualityPreset(),
-                TargetDriftPreset(),
-            ]
-        )
-        report.run(
-            reference_data=self.reference_df,
-            current_data=current_df,
-            column_mapping=self._column_mapping,
-        )
-        return report
+        ref_dataset = Dataset.from_pandas(self.reference_df, data_definition=self._data_definition)
+        cur_dataset = Dataset.from_pandas(current_df, data_definition=self._data_definition)
+
+        report = Report(metrics=[DataDriftPreset(), DataSummaryPreset()])
+        snapshot = report.run(reference_data=ref_dataset, current_data=cur_dataset)
+        return snapshot
 
     def save_report(
         self,
-        report: Report,
+        snapshot,
         output_path: str | Path = "reports/drift_report.html",
     ) -> Path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        report.save_html(str(path))
+        snapshot.save_html(str(path))
         logger.info("Drift report saved to %s", path)
         return path
 
-    def get_drift_summary(self, report: Report) -> dict:
+    def get_drift_summary(self, snapshot) -> dict:
         """
         Extract a flat dict of drift metrics suitable for MLflow logging.
 
-        Returns keys like: n_drifted_features, share_drifted, dataset_drift
+        Returns keys: n_drifted_features, share_drifted, dataset_drift_detected
         """
-        result = report.as_dict()
+        result = snapshot.dict()
         metrics = result.get("metrics", [])
         summary: dict = {}
 
         for m in metrics:
-            if m.get("metric") == "DatasetDriftMetric":
-                r = m.get("result", {})
-                summary["n_drifted_features"] = r.get("number_of_drifted_columns", 0)
-                summary["share_drifted"] = round(r.get("share_of_drifted_columns", 0), 4)
-                summary["dataset_drift_detected"] = int(r.get("dataset_drift", False))
+            name = m.get("metric_name", "")
+            if name.startswith("DriftedColumnsCount"):
+                value = m.get("value", {})
+                count = value.get("count", 0) if isinstance(value, dict) else 0
+                share = value.get("share", 0) if isinstance(value, dict) else 0
+                summary["n_drifted_features"] = int(count)
+                summary["share_drifted"] = round(float(share), 4)
+                # Dataset-level drift flagged when >50% of columns drifted
+                # (matches DriftedColumnsCount's default drift_share threshold)
+                summary["dataset_drift_detected"] = int(share > 0.5)
 
         return summary
 
-    def log_to_mlflow(self, report: Report, run_id: str | None = None) -> None:
+    def log_to_mlflow(self, snapshot, run_id: str | None = None) -> None:
         """Log drift summary metrics and the HTML report as an MLflow artifact."""
         import mlflow
 
         from src.config import settings
 
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
-        summary = self.get_drift_summary(report)
+        summary = self.get_drift_summary(snapshot)
 
         ctx = (
             mlflow.start_run(run_id=run_id)
@@ -150,7 +165,7 @@ class DriftDetector:
         )
         with ctx:
             mlflow.log_metrics({k: float(v) for k, v in summary.items() if isinstance(v, (int, float))})
-            path = self.save_report(report)
+            path = self.save_report(snapshot)
             mlflow.log_artifact(str(path), artifact_path="drift_reports")
 
         logger.info("Drift metrics logged to MLflow: %s", summary)

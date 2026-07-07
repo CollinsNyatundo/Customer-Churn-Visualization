@@ -59,7 +59,7 @@
 6. **Train** — GradientBoostingClassifier with 3-fold CV; AUC, F1, confusion matrix logged as artifacts
 7. **Register** — model promoted to MLflow `Staging` automatically; manual promotion to `Production`
 8. **Serve** — FastAPI loads `Production` model at startup; falls back to `Staging`
-9. **Monitor** — daily Evidently drift check against reference dataset; alerts fired if drift detected
+9. **Monitor** — daily Evidently drift check against reference dataset; alerts fired if drift detected. The reference dataset (`data/processed/reference.parquet`) is generated automatically at the end of every successful `full_pipeline_flow()` training run — each new model's training distribution becomes the drift baseline for the period until the next retrain.
 
 ## Module map
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ class PerformanceMonitor:
     ) -> None:
         """Append one prediction record. actual_churn filled in later."""
         record = {
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "customer_id": customer_id,
             "prob": round(churn_probability, 6),
             "actual": actual_churn,
@@ -90,7 +90,7 @@ class PerformanceMonitor:
         if df.empty:
             return df
         df["ts"] = pd.to_datetime(df["ts"])
-        cutoff = datetime.utcnow() - timedelta(days=window_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
         df = df[df["ts"] >= cutoff]
         # Only rows with observed outcomes
         return df[df["actual"].notna()].copy()
@@ -126,7 +126,7 @@ class PerformanceMonitor:
             "precision": round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
             "recall": round(float(recall_score(y_true, y_pred, zero_division=0)), 4),
             "churn_rate": round(float(y_true.mean()), 4),
-            "computed_at": datetime.utcnow().isoformat(),
+            "computed_at": datetime.now(timezone.utc).isoformat(),
         }
         log.info("Performance metrics (window=%dd): %s", window_days, metrics)
         return metrics

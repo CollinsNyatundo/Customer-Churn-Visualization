@@ -111,24 +111,6 @@ async def add_timing_header(request: Request, call_next):
     response.headers["X-Response-Time-Ms"] = str(round((time.perf_counter() - t0) * 1000, 2))
     return response
 
-    log.info("Pre-loading churn model ...")
-    if settings.env == "production":
-        # In production, fail hard if model is missing — don't serve blind
-        try:
-            get_predictor()
-            log.info("Model loaded successfully.")
-        except Exception as e:
-            log.error("FATAL: model could not be loaded at startup: %s", e)
-            raise
-    else:
-        try:
-            get_predictor()
-            log.info("Model loaded successfully.")
-        except Exception as e:
-            log.warning(
-                "Model not available at startup (dev mode): %s. " "Inference will fail until model is registered.", e
-            )
-
 
 # ── Ops ───────────────────────────────────────────────────────────────────────
 
@@ -239,6 +221,7 @@ async def explain(
             predictor.get_pipeline(),
             customer.model_dump(),
             top_n=top_n,
+            thresholds=predictor.thresholds,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -280,6 +263,7 @@ async def explain_batch(
                 predictor.get_pipeline(),
                 customer.model_dump(),
                 top_n=min(top_n, 30),
+                thresholds=predictor.thresholds,
             )
             results.append(
                 ExplainResponse(

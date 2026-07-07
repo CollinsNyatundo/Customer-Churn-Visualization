@@ -115,6 +115,15 @@ class AlertManager:
         self.slack = SlackAlerter()
         self.email = EmailAlerter()
 
+    def send(self, title: str, body: str, level: str = "warning") -> None:
+        """
+        Generic alert dispatch — tries Slack, then email, with the given
+        title/body/level. Used by callers (e.g. src.monitoring.performance)
+        that don't fit one of the typed alert methods below.
+        """
+        self.slack.send(title, body, level=level)
+        self.email.send(subject=f"[Churn ML] {title}", body=body)
+
     def send_drift_alert(self, n_drifted: int, share: float, report_path: str) -> None:
         title = "Data Drift Detected"
         message = (

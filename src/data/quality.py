@@ -5,6 +5,20 @@ Pandera data quality contracts for each source.
 
 Run automatically in MultiSourcePipeline after extraction.
 Raises SchemaError on breach — makes data problems loud and early.
+
+Fix applied after code review
+------------------------------
+Every non-key column below is marked required=False. Pandera's default
+is required=True for every declared column, meaning a DataFrame missing
+even one optional field (e.g. a partial payload, or a source that hasn't
+populated every column yet) would fail validation entirely on a
+"column_in_dataframe" error — regardless of whether the columns that
+WERE present were perfectly valid. This module had zero test coverage
+before this review, so that default was never actually exercised against
+real data. Only the entity key ("id") and, for bcg_client, the target
+("churn") are genuinely required; every quality/range check should apply
+only when the column is present, matching the "validate what's there"
+philosophy used elsewhere (e.g. validate_features()).
 """
 
 from __future__ import annotations
@@ -23,12 +37,12 @@ BCG_CLIENT_SCHEMA = DataFrameSchema(
     columns={
         "id": Column(str, nullable=False, unique=True),
         "churn": Column(bool, nullable=False),
-        "cons_12m": Column(float, checks=Check.ge(0), nullable=True),
-        "cons_gas_12m": Column(float, checks=Check.ge(0), nullable=True),
-        "net_margin": Column(float, nullable=True),
-        "num_years_antig": Column(float, checks=Check.ge(0), nullable=True),
-        "pow_max": Column(float, checks=Check.ge(0), nullable=True),
-        "nb_prod_act": Column(int, checks=Check.ge(1), nullable=True),
+        "cons_12m": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "cons_gas_12m": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "net_margin": Column(float, nullable=True, required=False),
+        "num_years_antig": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "pow_max": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "nb_prod_act": Column(int, checks=Check.ge(1), nullable=True, required=False),
     },
     coerce=True,
 )
@@ -37,10 +51,10 @@ BCG_CLIENT_SCHEMA = DataFrameSchema(
 CRM_SCHEMA = DataFrameSchema(
     columns={
         "id": Column(str, nullable=False),
-        "nps_score": Column(float, checks=[Check.ge(-100), Check.le(100)], nullable=True),
-        "satisfaction_score": Column(float, checks=[Check.ge(1), Check.le(5)], nullable=True),
-        "num_contacts_6m": Column(int, checks=Check.ge(0), nullable=True),
-        "last_contact_days_ago": Column(int, checks=Check.ge(0), nullable=True),
+        "nps_score": Column(float, checks=[Check.ge(-100), Check.le(100)], nullable=True, required=False),
+        "satisfaction_score": Column(float, checks=[Check.ge(1), Check.le(5)], nullable=True, required=False),
+        "num_contacts_6m": Column(int, checks=Check.ge(0), nullable=True, required=False),
+        "last_contact_days_ago": Column(int, checks=Check.ge(0), nullable=True, required=False),
     },
     coerce=True,
 )
@@ -49,11 +63,11 @@ CRM_SCHEMA = DataFrameSchema(
 SUPPORT_SCHEMA = DataFrameSchema(
     columns={
         "id": Column(str, nullable=False),
-        "num_tickets_6m": Column(int, checks=Check.ge(0), nullable=True),
-        "avg_resolution_hours": Column(float, checks=Check.ge(0), nullable=True),
-        "escalations_6m": Column(int, checks=Check.ge(0), nullable=True),
-        "open_tickets": Column(int, checks=Check.ge(0), nullable=True),
-        "post_ticket_csat": Column(float, checks=[Check.ge(1), Check.le(5)], nullable=True),
+        "num_tickets_6m": Column(int, checks=Check.ge(0), nullable=True, required=False),
+        "avg_resolution_hours": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "escalations_6m": Column(int, checks=Check.ge(0), nullable=True, required=False),
+        "open_tickets": Column(int, checks=Check.ge(0), nullable=True, required=False),
+        "post_ticket_csat": Column(float, checks=[Check.ge(1), Check.le(5)], nullable=True, required=False),
     },
     coerce=True,
 )
@@ -62,10 +76,10 @@ SUPPORT_SCHEMA = DataFrameSchema(
 BILLING_SCHEMA = DataFrameSchema(
     columns={
         "id": Column(str, nullable=False),
-        "num_late_payments_12m": Column(int, checks=Check.ge(0), nullable=True),
-        "avg_days_late": Column(float, checks=Check.ge(0), nullable=True),
-        "total_outstanding": Column(float, checks=Check.ge(0), nullable=True),
-        "discount_pct": Column(int, checks=[Check.ge(0), Check.le(100)], nullable=True),
+        "num_late_payments_12m": Column(int, checks=Check.ge(0), nullable=True, required=False),
+        "avg_days_late": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "total_outstanding": Column(float, checks=Check.ge(0), nullable=True, required=False),
+        "discount_pct": Column(int, checks=[Check.ge(0), Check.le(100)], nullable=True, required=False),
     },
     coerce=True,
 )

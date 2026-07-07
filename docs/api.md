@@ -105,6 +105,30 @@ Predict + return top-N SHAP feature attributions.
 
 ---
 
+### `POST /explain/batch`
+SHAP explanations for up to 50 customers in one call — for compliance
+reporting or dashboards that need attributions across many records at once.
+
+**Query params**: `top_n` (default 5, max 30)
+**Request**: JSON array of `CustomerFeatures` objects (max 50)
+**Response**: JSON array of `ExplainResponse` objects (same order)
+**Limit**: 400 Bad Request if > 50 items.
+
+---
+
+## Rate limits
+
+| Endpoint | Limit |
+|---|---|
+| `POST /predict` | 100/minute per client |
+| `POST /predict/batch` | 20/minute per client |
+| `POST /explain` | 30/minute per client |
+| `POST /explain/batch` | 10/minute per client |
+
+Exceeding a limit returns `429 Too Many Requests`.
+
+---
+
 ## Error codes
 
 | Code | Meaning |
@@ -113,5 +137,6 @@ Predict + return top-N SHAP feature attributions.
 | 403 | Invalid API key |
 | 400 | Validation error or batch limit exceeded |
 | 422 | Field value out of allowed range |
+| 429 | Rate limit exceeded — see table above |
 | 503 | Model not yet loaded — run the pipeline first |
 | 500 | Internal server error |

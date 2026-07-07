@@ -48,6 +48,7 @@ import os
 import pandas as pd
 
 from src.data.preprocessing import aggregate_price_data, clean_client_data, null_report
+from src.data.quality import validate_source
 from src.data.sources.bank_source import BankChurnSource
 from src.data.sources.bcg_source import BCGClientSource, BCGPriceSource
 from src.data.sources.billing_source import BillingSource
@@ -162,6 +163,7 @@ class MultiSourcePipeline:
         client_df, meta = self._client_src.load()
         all_meta.update(meta.as_dict())
         client_df = clean_client_data(client_df)
+        client_df = validate_source(client_df, "bcg_client", strict=False)
         client_ids = client_df["id"].tolist()
 
         # 2. BCG price (aggregate → one row per client)
@@ -169,26 +171,25 @@ class MultiSourcePipeline:
         all_meta.update(meta.as_dict())
         price_agg = aggregate_price_data(price_df)
 
-        # 3. CRM
+        # 3. CRM — factory methods already construct sources with the
+        # correct client_ids (synthetic) or none needed (API-backed), so
+        # no post-construction mutation is required here.
         crm_src = self._get_crm_source(client_ids)
-        if hasattr(crm_src, "client_ids") and not crm_src.client_ids:
-            crm_src.client_ids = client_ids
         crm_df, meta = crm_src.load()
         all_meta.update(meta.as_dict())
+        crm_df = validate_source(crm_df, "crm", strict=False)
 
         # 4. Support
         support_src = self._get_support_source(client_ids)
-        if hasattr(support_src, "client_ids") and not support_src.client_ids:
-            support_src.client_ids = client_ids
         support_df, meta = support_src.load()
         all_meta.update(meta.as_dict())
+        support_df = validate_source(support_df, "support", strict=False)
 
         # 5. Billing
         billing_src = self._get_billing_source(client_ids)
-        if hasattr(billing_src, "client_ids") and not billing_src.client_ids:
-            billing_src.client_ids = client_ids
         billing_df, meta = billing_src.load()
         all_meta.update(meta.as_dict())
+        billing_df = validate_source(billing_df, "billing", strict=False)
 
         # 6. Merge BCG + enrichment sources
         df = (

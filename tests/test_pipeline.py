@@ -69,6 +69,46 @@ class TestMultiSourcePipeline:
         assert "support_rows" in meta
         assert "billing_rows" in meta
 
+    def test_quality_validation_warns_on_bad_data_without_crashing(
+        self, sample_client_df, sample_price_df, client_ids, caplog
+    ):
+        """
+        src.data.quality.validate_source() is wired into pipeline.run() in
+        non-strict mode: bad data should log a WARNING but the pipeline
+        must still complete (strict=True would be appropriate for a
+        stricter deployment profile, but the default must not turn a data
+        quality issue into a hard pipeline failure).
+        """
+        import logging
+
+        bad_client_df = sample_client_df.copy()
+        bad_client_df.loc[0, "nb_prod_act"] = 0  # invalid: schema requires >= 1, and
+        # clean_client_data() does not touch this column (unlike negative
+        # consumption, which gets clipped upstream before quality validation
+        # ever sees it — confirmed by this test initially failing against
+        # a negative cons_12m value for exactly that reason).
+
+        client_src = MagicMock(spec=BCGClientSource)
+        client_src.name = "bcg_client"
+        client_src.load.return_value = (bad_client_df, MagicMock(as_dict=lambda: {}))
+        price_src = MagicMock(spec=BCGPriceSource)
+        price_src.name = "bcg_price"
+        price_src.load.return_value = (sample_price_df, MagicMock(as_dict=lambda: {}))
+
+        pipeline = MultiSourcePipeline(
+            client_source=client_src,
+            price_source=price_src,
+            crm_source=CRMSource(client_ids=client_ids),
+            support_source=SupportSource(client_ids=client_ids),
+            billing_source=BillingSource(client_ids=client_ids),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="src.data.quality"):
+            df, meta = pipeline.run()  # must not raise
+
+        assert len(df) == len(bad_client_df)
+        assert any("Data quality breach" in record.message for record in caplog.records)
+
 
 class TestModelTraining:
     def test_train_returns_run_id(self, merged_df):

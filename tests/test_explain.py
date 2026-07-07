@@ -1,4 +1,16 @@
-"""tests/test_explain.py — SHAP explainability endpoint tests."""
+"""
+tests/test_explain.py — SHAP explainability endpoint tests.
+
+Scope note: this module mocks explain_prediction() entirely, so it verifies
+FastAPI response schema and status-code wiring only — NOT the actual SHAP
+computation, pipeline step-name resolution, or feature-column handling
+inside explain_prediction() itself. Those were exactly the areas where a
+real bug (KeyError on pipeline.named_steps["preprocessor"]) went undetected
+for a long time, because MagicMock silently absorbs any attribute/item
+access without ever raising. For genuine functional coverage of
+explain_prediction() against a real trained model and real preprocessor,
+see tests/test_e2e.py::TestAPIWithRealModel::test_explain_*.
+"""
 
 from unittest.mock import MagicMock, patch
 

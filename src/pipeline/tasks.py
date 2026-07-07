@@ -33,7 +33,22 @@ def extract_sources() -> tuple[pd.DataFrame, dict]:
 
 @task(name="engineer-features")
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply all feature engineering transformations."""
+    """
+    Apply feature engineering for the saved Parquet snapshot + Sweetviz
+    report (descriptive/EDA purposes).
+
+    Note: this intentionally uses batch-wide quantile thresholds (the
+    build_feature_set default when thresholds=None), computed across the
+    full dataset — appropriate for a descriptive snapshot, same as
+    app.py's dashboard. train_churn_model() downstream does its own
+    train/test split and re-runs build_feature_set() with thresholds
+    frozen from the training split only, which is what actually gets
+    served — the correctly-split values overwrite these on the same
+    column names, so model correctness is unaffected. The two calls are
+    computing feature values for two different purposes (description vs.
+    training) and happen to use the same function with different threshold
+    sourcing by design, not by omission.
+    """
     log = get_run_logger()
     before = set(df.columns)
     df = build_feature_set(df)
@@ -105,6 +120,28 @@ def save_processed(df: pd.DataFrame, filename: str = "merged_features.parquet") 
     settings.ensure_dirs()
     path = settings.data_processed_dir / filename
     df.to_parquet(path, index=False)
+    return str(path)
+
+
+@task(name="save-reference-snapshot")
+def save_reference_snapshot(df: pd.DataFrame, filename: str = "reference.parquet") -> str:
+    """
+    Save the current training dataset as the drift-detection reference
+    snapshot. Without this, src/monitoring/monitor_flow.py's
+    drift_monitoring_flow() always raises FileNotFoundError on a fresh
+    deployment — nothing else in the codebase ever writes reference.parquet.
+
+    Called after a successful training run: each new model's training
+    distribution becomes the baseline for detecting drift until the next
+    retrain, which is the correct semantics (drift is measured relative to
+    what the currently-deployed model was actually trained on).
+    """
+    from src.config import settings
+
+    settings.ensure_dirs()
+    path = settings.data_processed_dir / filename
+    df.to_parquet(path, index=False)
+    logger.info("Reference snapshot saved for drift detection: %s (%d rows)", path, len(df))
     return str(path)
 
 

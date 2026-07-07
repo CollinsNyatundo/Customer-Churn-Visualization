@@ -4,6 +4,28 @@ api/explain.py
 SHAP-based feature explainability for individual predictions.
 Returns the top N features driving a churn prediction, with direction
 and magnitude — suitable for CRM tooltips, dashboards, and audit logs.
+
+Fixes applied after code review
+--------------------------------
+1. Pipeline step name was hard-coded to "preprocessor", but every real
+   pipeline built in src/models/algorithms.py uses the step name "pre".
+   This meant every /explain call raised KeyError in production — fixed
+   to resolve "pre" first, "preprocessor" as fallback.
+2. NUMERIC_FEATURES/CATEGORICAL_FEATURES were a separate, incomplete,
+   independently-drifted copy of the feature contract (~27 features vs
+   the real 67, and missing BOOLEAN_AS_INT_FEATURES entirely). Now reads
+   the exact expected columns directly from the fitted ColumnTransformer's
+   .transformers_ attribute — the single source of truth for what a
+   *specific* trained model actually expects, immune to drift between
+   feature_contract.py and any given historical model version.
+3. build_feature_set() was called with no thresholds, silently repeating
+   the P0.2 training-serving-skew bug for every SHAP explanation. Now
+   accepts a thresholds parameter that the caller (api/main.py) supplies
+   from predictor.thresholds.
+4. StackingEnsemble champions don't have .named_steps like a plain
+   sklearn Pipeline — explanations now fall back to one of its fitted
+   base learners, since all base learners share the same feature
+   contract by construction.
 """
 
 from __future__ import annotations
@@ -12,66 +34,82 @@ import logging
 
 import pandas as pd
 
-from src.features.engineering import build_feature_set
+from src.features.engineering import FeatureThresholds, build_feature_set
 
 logger = logging.getLogger(__name__)
 
-# Features the model was trained on (must match churn_model.py)
-NUMERIC_FEATURES = [
-    "cons_12m",
-    "cons_gas_12m",
-    "cons_last_month",
-    "imp_cons",
-    "net_margin",
-    "margin_gross_pow_ele",
-    "num_years_antig",
-    "pow_max",
-    "nb_prod_act",
-    "forecast_discount_energy",
-    "nps_score",
-    "satisfaction_score",
-    "num_contacts_6m",
-    "last_contact_days_ago",
-    "num_tickets_6m",
-    "avg_resolution_hours",
-    "escalations_6m",
-    "open_tickets",
-    "num_late_payments_12m",
-    "avg_days_late",
-    "total_outstanding",
-    "discount_pct",
-    "contract_duration_days",
-    "months_to_renewal",
-    "cons_growth_rate",
-    "price_spread_var",
-    "margin_efficiency",
-]
-CATEGORICAL_FEATURES = [
-    "channel_sales",
-    "activity_new",
-    "origin_up",
-    "contract_type",
-    "payment_method",
-    "top_ticket_category",
-]
-ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
+def _resolve_preprocessor_and_clf(pipeline):
+    """
+    Extract (preprocessor, classifier) from either a plain sklearn Pipeline
+    (step name "pre") or a StackingEnsemble (falls back to one of its
+    fitted base pipelines, which all share the same feature contract).
+    """
+    target = pipeline
+    if hasattr(target, "_fitted_bases") and target._fitted_bases:
+        target = next(iter(target._fitted_bases.values()))
+
+    named_steps = getattr(target, "named_steps", None)
+    if named_steps is None:
+        raise ValueError(
+            f"Cannot extract preprocessor/classifier from pipeline of type "
+            f"{type(pipeline).__name__} — expected sklearn Pipeline or StackingEnsemble."
+        )
+
+    preprocessor = named_steps.get("pre") or named_steps.get("preprocessor")
+    clf = named_steps.get("clf")
+    if preprocessor is None or clf is None:
+        raise ValueError(
+            f"Pipeline steps {list(named_steps.keys())} do not contain expected "
+            "'pre'/'preprocessor' and 'clf' names."
+        )
+    return preprocessor, clf
 
 
-def explain_prediction(pipeline, features: dict, top_n: int = 10) -> list[dict]:
+def _expected_columns(preprocessor) -> tuple[list[str], list[str]]:
+    """
+    Read the exact (numeric, categorical) column lists the fitted
+    ColumnTransformer expects, straight from its .transformers_ attribute.
+    This guarantees exact parity with whatever that specific model was
+    actually trained on — safer than re-deriving lists from
+    feature_contract.py, which could drift from an older model version.
+    """
+    num_cols, cat_cols = [], []
+    for name, _, col_list in preprocessor.transformers_:
+        if not isinstance(col_list, list):
+            continue
+        if name == "num":
+            num_cols = col_list
+        elif name == "cat":
+            cat_cols = col_list
+    return num_cols, cat_cols
+
+
+def explain_prediction(
+    pipeline,
+    features: dict,
+    top_n: int = 10,
+    thresholds: FeatureThresholds | None = None,
+) -> list[dict]:
     """
     Compute SHAP values for a single prediction and return the top N
     most influential features.
 
     Parameters
     ----------
-    pipeline : fitted sklearn Pipeline (preprocessor + clf)
-    features : raw feature dict (same schema as CustomerFeatures)
-    top_n    : number of top features to return
+    pipeline   : fitted sklearn Pipeline or StackingEnsemble
+    features   : raw feature dict (same schema as CustomerFeatures)
+    top_n      : number of top features to return
+    thresholds : frozen FeatureThresholds from training (via predictor.thresholds).
+                 Without this, threshold-based features (high_consumption,
+                 low_margin, etc.) would be computed with all-zero defaults,
+                 producing misleading SHAP attributions — the same class of
+                 bug fixed in api/predictor.py for regular predictions.
 
     Returns
     -------
     List of dicts sorted by |shap_value| descending:
-        [{"feature": str, "value": any, "shap_value": float,
+        [{"feature": str, "raw_value": any, "shap_value": float,
           "direction": "increases_churn" | "decreases_churn"}, ...]
     """
     try:
@@ -80,18 +118,34 @@ def explain_prediction(pipeline, features: dict, top_n: int = 10) -> list[dict]:
         logger.warning("shap not installed — returning empty explanation")
         return []
 
+    if thresholds is None:
+        logger.warning(
+            "explain_prediction() called without thresholds — threshold-based "
+            "features (high_consumption, low_margin, ...) will use zero "
+            "defaults, potentially producing misleading SHAP attributions."
+        )
+
     df_raw = pd.DataFrame([features])
-    df_feat = build_feature_set(df_raw)
+    df_feat = build_feature_set(df_raw, thresholds=thresholds)
 
-    available_num = [c for c in NUMERIC_FEATURES if c in df_feat.columns]
-    available_cat = [c for c in CATEGORICAL_FEATURES if c in df_feat.columns]
-    X = df_feat[available_num + available_cat]
+    preprocessor, clf = _resolve_preprocessor_and_clf(pipeline)
+    available_num, available_cat = _expected_columns(preprocessor)
 
-    preprocessor = pipeline.named_steps["preprocessor"]
-    clf = pipeline.named_steps["clf"]
+    # Reindex to the fitted model's exact expected columns so the
+    # ColumnTransformer doesn't raise on engineered features that couldn't
+    # be computed from a raw API payload (e.g. date-derived features) —
+    # same reasoning as predictor._features(). Imputers fill these NaNs
+    # with the training-time median/constant, consistent with how the
+    # model was fit.
+    all_expected = available_num + available_cat
+    missing = [c for c in all_expected if c not in df_feat.columns]
+    if missing:
+        logger.debug("Reindexing %d columns not computable from API payload: %s", len(missing), sorted(missing))
+    df_feat = df_feat.reindex(columns=list(df_feat.columns) + missing)
+
+    X = df_feat[all_expected]
     X_transformed = preprocessor.transform(X)
 
-    # Get transformed feature names
     try:
         cat_names = (
             preprocessor.named_transformers_["cat"].named_steps["ohe"].get_feature_names_out(available_cat).tolist()
@@ -122,7 +176,7 @@ def explain_prediction(pipeline, features: dict, top_n: int = 10) -> list[dict]:
         # e.g. "channel_sales_online" → "channel_sales", value="online"
         raw_val = None
         display_name = fname
-        for cat_feat in CATEGORICAL_FEATURES if CATEGORICAL_FEATURES else []:
+        for cat_feat in available_cat:
             if fname.startswith(cat_feat + "_"):
                 display_name = cat_feat
                 category_value = fname[len(cat_feat) + 1 :]

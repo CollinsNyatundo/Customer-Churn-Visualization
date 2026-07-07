@@ -282,3 +282,42 @@ class TestAPIWithRealModel:
             assert tier == "medium"
         else:
             assert tier == "low"
+
+    def test_explain_returns_valid_shap_attributions(self, client_real):
+        """
+        Real end-to-end test of /explain with an actual trained model
+        (no mocked pipeline). This class of bug — pipeline.named_steps
+        KeyError, missing BOOLEAN_AS_INT_FEATURES causing "columns are
+        missing" ColumnTransformer errors, threshold-less feature building
+        — was previously invisible because test_explain.py mocks the
+        entire pipeline with MagicMock(), which silently absorbs any
+        attribute/item access without raising. A MagicMock never catches
+        a real KeyError or ValueError from a real fitted preprocessor.
+        """
+        resp = client_real.post(
+            "/explain?top_n=5",
+            json={"nps_score": -80, "num_years_antig": 0.5, "num_late_payments_12m": 5},
+        )
+        assert resp.status_code == 200, f"Unexpected status: {resp.status_code} {resp.text}"
+        body = resp.json()
+
+        assert 0 <= body["churn_probability"] <= 1
+        assert body["risk_tier"] in ("low", "medium", "high")
+        assert len(body["top_features"]) == 5
+        for feat in body["top_features"]:
+            assert "feature" in feat
+            assert "shap_value" in feat
+            assert feat["direction"] in ("increases_churn", "decreases_churn")
+
+    def test_explain_batch_matches_individual_explain(self, client_real):
+        """/explain/batch should return the same attributions as calling
+        /explain once per customer — proves the batch code path isn't
+        silently diverging from the single-customer path."""
+        payload = {"nps_score": -70, "num_years_antig": 1.0}
+
+        single = client_real.post("/explain?top_n=3", json=payload).json()
+        batch = client_real.post("/explain/batch?top_n=3", json=[payload]).json()
+
+        assert len(batch) == 1
+        assert abs(single["churn_probability"] - batch[0]["churn_probability"]) < 1e-6
+        assert len(batch[0]["top_features"]) == len(single["top_features"])

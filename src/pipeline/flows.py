@@ -25,6 +25,7 @@ from src.pipeline.tasks import (
     generate_report,
     log_pipeline_metrics,
     save_processed,
+    save_reference_snapshot,
     train_churn_model,
 )
 
@@ -73,6 +74,8 @@ def full_pipeline_flow(
     n_optuna_trials: int = 30,
 ) -> dict:
     """
+    Full pipeline: data steps + optional model training.
+
     Parameters
     ----------
     train           : whether to run model training (default True)
@@ -81,21 +84,23 @@ def full_pipeline_flow(
     build_stack     : build stacking ensemble over top-3 models
     n_optuna_trials : Optuna trials for hyperparameter search
     """
-    """Full pipeline: data steps + optional model training."""
     run_log = get_run_logger()
     run_log.info("=== Full pipeline flow started (train=%s) ===", train)
     df, parquet_path, report_path = _run_data_steps()
-    run_id = (
-        train_churn_model(
+    run_id = None
+    if train:
+        run_id = train_churn_model(
             df,
             algorithms=algorithms,
             optimise_best=optimise_best,
             build_stack=build_stack,
             n_optuna_trials=n_optuna_trials,
         )
-        if train
-        else None
-    )
+        # New model's training distribution becomes the drift baseline for
+        # the next monitoring period — without this, drift_monitoring_flow()
+        # has nothing to compare against on a fresh deployment.
+        save_reference_snapshot(df)
+
     result = {
         "parquet_path": parquet_path,
         "report_path": report_path,
@@ -103,10 +108,6 @@ def full_pipeline_flow(
     }
     run_log.info("Full pipeline complete: %s", result)
     return result
-
-
-if __name__ == "__main__":
-    full_pipeline_flow()
 
 
 @flow(
@@ -136,3 +137,7 @@ def performance_check_flow(window_days: int = 30, auto_retrain: bool = False) ->
         full_pipeline_flow(train=True, build_stack=True)
 
     return {"metrics": metrics, "alerts": alerts}
+
+
+if __name__ == "__main__":
+    full_pipeline_flow()

@@ -45,6 +45,7 @@ jobs:
             pandas numpy scikit-learn plotly pydantic pydantic-settings \
             fastapi httpx structlog mlflow faker feast \
             xgboost lightgbm catboost optuna \
+            tenacity slowapi pandera evidently shap imbalanced-learn \
             pytest pytest-cov
       - name: Run tests
         env:
