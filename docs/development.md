@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/CollinsNyatundo/Customer-Churn-Visualization.git
-cd Customer-Churn-Visualization
+git clone https://github.com/CollinsNyatundo/customer-churn-ml-system.git
+cd customer-churn-ml-system
 make install-dev          # installs deps + pre-commit hooks
 cp .env.example .env      # configure your environment
 ```

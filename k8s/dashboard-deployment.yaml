@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: dashboard
-          image: ghcr.io/collinsnyatundo/customer-churn-visualization:latest
+          image: ghcr.io/collinsnyatundo/customer-churn-ml-system:latest
           command: ["gunicorn", "app:server", "-b", "0.0.0.0:8050", "-w", "2", "--timeout", "120"]
           ports:
             - containerPort: 8050

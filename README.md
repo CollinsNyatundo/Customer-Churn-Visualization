@@ -1,6 +1,6 @@
 # Customer Churn ML System
 
-[![CI](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/ci.yml/badge.svg)](https://github.com/CollinsNyatundo/Customer-Churn-Visualization/actions/workflows/ci.yml)
+[![CI](https://github.com/CollinsNyatundo/customer-churn-ml-system/actions/workflows/ci.yml/badge.svg)](https://github.com/CollinsNyatundo/customer-churn-ml-system/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -47,8 +47,8 @@ Source adapters -> validation/merge -> feature engineering -> Feast sink
 ## Local setup
 
 ```bash
-git clone https://github.com/CollinsNyatundo/Customer-Churn-Visualization.git
-cd Customer-Churn-Visualization
+git clone https://github.com/CollinsNyatundo/customer-churn-ml-system.git
+cd customer-churn-ml-system
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

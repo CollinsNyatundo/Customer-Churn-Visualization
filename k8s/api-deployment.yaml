@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: churn-api
-          image: ghcr.io/collinsnyatundo/customer-churn-visualization:latest
+          image: ghcr.io/collinsnyatundo/customer-churn-ml-system:latest
           command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
           ports:
             - containerPort: 8000
