@@ -201,15 +201,16 @@ def train(
         schema_hash,
     )
 
-    # ── Algorithm sweep ───────────────────────────────────────────────────────
+    # ── Algorithm sweep on validation data ───────────────────────────────────
+    # The test split remains untouched until one champion has been selected.
     results: dict[str, dict] = {}
     for name in algorithms:
         log.info("Training %s...", name)
         try:
-            res = train_single(name, X_train, X_test, y_train, y_test, num_cols, cat_cols)
+            res = train_single(name, X_train, X_val, y_train, y_val, num_cols, cat_cols)
             results[name] = res
             log.info(
-                "  %s → AUC=%.4f  F1=%.4f  Brier=%.4f  Lift@10%%=%.2fx",
+                "  %s validation → AUC=%.4f  F1=%.4f  Brier=%.4f  Lift@10%%=%.2fx",
                 name,
                 res["test_auc"],
                 res["test_f1"],
@@ -230,9 +231,9 @@ def train(
             res_opt = train_single(
                 best_name,
                 X_train,
-                X_test,
+                X_val,
                 y_train,
-                y_test,
+                y_val,
                 num_cols,
                 cat_cols,
                 optimise_hp=True,
@@ -258,18 +259,18 @@ def train(
             ensemble = StackingEnsemble(base_pipes, cv_folds=3)
             ensemble.fit(X_train, y_train)
 
-            ens_prob = ensemble.predict_proba(X_test)[:, 1]
-            ens_auc = roc_auc_score(y_test, ens_prob)
-            ens_ap = average_precision_score(y_test, ens_prob)
-            ens_brier = brier_score_loss(y_test, ens_prob)
-            ens_threshold, _ = optimise_threshold(y_test.values, ens_prob, metric="f2")
+            ens_prob = ensemble.predict_proba(X_val)[:, 1]
+            ens_auc = roc_auc_score(y_val, ens_prob)
+            ens_ap = average_precision_score(y_val, ens_prob)
+            ens_brier = brier_score_loss(y_val, ens_prob)
+            ens_threshold, _ = optimise_threshold(y_val.values, ens_prob, metric="f2")
             ens_pred = (ens_prob >= ens_threshold).astype(int)
-            ens_rpt = classification_report(y_test, ens_pred, output_dict=True)
+            ens_rpt = classification_report(y_val, ens_pred, output_dict=True)
 
             results["StackingEnsemble"] = {
                 "name": "StackingEnsemble",
                 "pipeline": ensemble,
-                "y_test": y_test.values,
+                "y_test": y_val.values,
                 "y_prob": ens_prob,
                 "y_pred": ens_pred,
                 "cv_auc": ens_auc,
@@ -297,6 +298,28 @@ def train(
     overall_best = max(results, key=lambda n: results[n]["test_auc"])
     best = results[overall_best]
 
+    # Evaluate the selected champion exactly once on the untouched test split.
+    # The decision threshold remains the value chosen on validation data.
+    test_prob = best["pipeline"].predict_proba(X_test)[:, 1]
+    test_pred = (test_prob >= best["opt_threshold"]).astype(int)
+    test_report = classification_report(y_test, test_pred, output_dict=True, zero_division=0)
+    best.update(
+        {
+            "y_test": y_test.values,
+            "y_prob": test_prob,
+            "y_pred": test_pred,
+            "test_auc": float(roc_auc_score(y_test, test_prob)),
+            "test_ap": float(average_precision_score(y_test, test_prob)),
+            "test_f1": float(test_report["weighted avg"]["f1-score"]),
+            "brier": float(brier_score_loss(y_test, test_prob)),
+            "lift_10": _lift_at(y_test.values, test_prob, 0.10),
+            "lift_20": _lift_at(y_test.values, test_prob, 0.20),
+            "opt_f1": float(test_report["weighted avg"]["f1-score"]),
+            "opt_recall": float(test_report["1"]["recall"]),
+            "report": test_report,
+        }
+    )
+
     with model_run(run_name=f"ChurnModel-{overall_best}") as tracking:
         log_params(
             {
@@ -315,19 +338,21 @@ def train(
             }
         )
 
-        # All model metrics
+        # Candidate metrics are validation metrics; only the champion values
+        # above are replaced with final holdout-test metrics.
         for name, res in results.items():
             prefix = name.replace(" ", "_")
+            split = "test" if name == overall_best else "validation"
             log_metrics(
                 {
-                    f"{prefix}_test_auc": res["test_auc"],
-                    f"{prefix}_test_ap": res.get("test_ap", 0),
-                    f"{prefix}_test_f1": res["test_f1"],
-                    f"{prefix}_brier": res["brier"],
-                    f"{prefix}_lift_10": res["lift_10"],
-                    f"{prefix}_lift_20": res["lift_20"],
-                    f"{prefix}_opt_f1": res.get("opt_f1", 0),
-                    f"{prefix}_opt_recall": res.get("opt_recall", 0),
+                    f"{prefix}_{split}_auc": res["test_auc"],
+                    f"{prefix}_{split}_ap": res.get("test_ap", 0),
+                    f"{prefix}_{split}_f1": res["test_f1"],
+                    f"{prefix}_{split}_brier": res["brier"],
+                    f"{prefix}_{split}_lift_10": res["lift_10"],
+                    f"{prefix}_{split}_lift_20": res["lift_20"],
+                    f"{prefix}_{split}_threshold_f1": res.get("opt_f1", 0),
+                    f"{prefix}_{split}_threshold_recall": res.get("opt_recall", 0),
                 }
             )
 
